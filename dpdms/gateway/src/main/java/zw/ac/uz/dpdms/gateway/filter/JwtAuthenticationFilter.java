@@ -3,6 +3,7 @@ package zw.ac.uz.dpdms.gateway.filter;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -31,16 +32,16 @@ import java.util.List;
  * gateway is not acceptable - a service must reject a request even
  * if it somehow reached it without going through this filter.
  *
- * TODO once auth-service exists: replace the hardcoded secret below
- * with a value pulled from a shared config (env var: JWT_SECRET),
- * identical to the one auth-service signs tokens with.
+ * The secret is read from jwt.secret (JWT_SECRET env var, same
+ * fallback default as auth-service's application.yml). It MUST stay
+ * byte-for-byte identical to auth-service's secret - if you change
+ * one, change the other, in both places, at the same time.
  */
 @Component
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
-    // Placeholder secret - MUST match auth-service's signing key.
-    // Replace with an environment variable before anyone commits real code.
-    private static final String SECRET = "REPLACE_WITH_ENV_VAR_JWT_SECRET_AT_LEAST_32_CHARS_LONG";
+    @Value("${jwt.secret:local-dev-only-shared-dpdms-jwt-secret-change-before-submission}")
+    private String secret;
 
     private static final List<String> PUBLIC_PATHS = List.of(
             "/auth-service/api/auth/login",
@@ -64,7 +65,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String token = authHeader.substring(7);
 
         try {
-            SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+            SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
             Claims claims = Jwts.parser()
                     .verifyWith(key)
                     .build()

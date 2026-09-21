@@ -34,7 +34,7 @@
     <modules>
         <module>discovery-service</module>
         <module>gateway</module>
-        <!-- <module>auth-service</module> -->
+        <module>auth-service</module>
         <!-- <module>flood-service</module> -->
         <!-- <module>drought-service</module> -->
         <!-- <module>fire-service</module> -->

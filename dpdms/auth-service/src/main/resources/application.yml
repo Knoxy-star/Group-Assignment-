@@ -1,0 +1,38 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+  datasource:
+    url: jdbc:mysql://localhost:3306/auth_db?createDatabaseIfNotExist=true
+    username: ${MYSQL_APP_USER:dpdms}
+    password: ${MYSQL_APP_PASSWORD:dpdms_pass}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+# JWT_SECRET must be IDENTICAL across auth-service and gateway, or
+# tokens issued here will fail validation at the gateway. Set it as a
+# real environment variable before final submission/demo; the fallback
+# below is for local development convenience only.
+jwt:
+  secret: ${JWT_SECRET:local-dev-only-shared-dpdms-jwt-secret-change-before-submission}
+  expiration-minutes: ${JWT_EXPIRATION_MINUTES:480}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

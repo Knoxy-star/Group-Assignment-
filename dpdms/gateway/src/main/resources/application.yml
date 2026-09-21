@@ -1,6 +1,11 @@
 server:
   port: 8080
 
+# Must be byte-for-byte identical to auth-service's jwt.secret, since
+# this is what validates tokens auth-service issues.
+jwt:
+  secret: ${JWT_SECRET:local-dev-only-shared-dpdms-jwt-secret-change-before-submission}
+
 spring:
   application:
     name: gateway
