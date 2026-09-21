@@ -1,0 +1,46 @@
+version: "3.8"
+
+# This Compose file runs the INFRASTRUCTURE only: MySQL and RabbitMQ.
+# During development, run the 9 Spring Boot services yourself via
+# `mvn spring-boot:run` in each module (or your IDE) - that gives much
+# faster restart cycles than rebuilding Docker images every change.
+#
+# Before the final submission/demo, we can add each service as a
+# container here too (Dockerfiles are trivial to add once the code is
+# stable), so the whole system starts with one `docker-compose up`.
+# Doing that now, before any service code exists, would just slow down
+# everyone's inner dev loop for no benefit yet.
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dpdms-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_pass"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: dpdms-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"   # AMQP port - services connect here
+      - "15672:15672" # Management UI - http://localhost:15672 (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
