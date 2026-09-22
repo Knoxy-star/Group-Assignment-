@@ -43,17 +43,33 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     @Value("${jwt.secret:local-dev-only-shared-dpdms-jwt-secret-change-before-submission}")
     private String secret;
 
-    private static final List<String> PUBLIC_PATHS = List.of(
+    private static final List<String> PUBLIC_PATH_PREFIXES = List.of(
             "/auth-service/api/auth/login",
             "/auth-service/api/auth/register",
             "/eureka"
+    );
+
+    // Page shells (/web/**) and static assets are public: the pages
+    // themselves carry no data, they just contain JS that calls the
+    // real, protected API endpoints (/*/api/**) with a token. The
+    // actual RBAC enforcement happens on those API calls, not here.
+    private static final List<String> PUBLIC_PATH_CONTAINS = List.of(
+            "/web/", "/js/", "/css/", "/webjars/", "/swagger-ui", "/v3/api-docs", "/actuator/health"
+    );
+
+    private static final List<String> PUBLIC_PATH_SUFFIXES = List.of(
+            ".html", ".js", ".css", ".ico", ".png", ".svg"
     );
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
 
-        if (PUBLIC_PATHS.stream().anyMatch(path::startsWith)) {
+        boolean isPublic = PUBLIC_PATH_PREFIXES.stream().anyMatch(path::startsWith)
+                || PUBLIC_PATH_CONTAINS.stream().anyMatch(path::contains)
+                || PUBLIC_PATH_SUFFIXES.stream().anyMatch(path::endsWith);
+
+        if (isPublic) {
             return chain.filter(exchange);
         }
 

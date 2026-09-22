@@ -138,3 +138,89 @@ service should:
 
 A per-hazard checklist (exact fields, exact DB table, exact DTOs) will be
 issued once flood-service is done.
+
+## mining-accident-service (Day 3) - REFERENCE IMPLEMENTATION
+
+Runs on port 8082. This is the pattern the other four hazard services
+copy. It has:
+- REST API (`/mining-accident-service/api/incidents/**`) with full
+  CRUD + approval workflow (approve / reject / request-corrections)
+- Web pages (`/mining-accident-service/web/submit`,
+  `/web/my-submissions`, `/web/queue`) - plain Thymeleaf pages whose JS
+  calls the REST API with a token from localStorage (set by the login
+  page)
+- RBAC/scoping enforced in the service layer via `HazardScopeGuard`
+  (from the shared `common` module) - never trust the gateway alone
+- Audit log recording every state transition
+
+**Try it end to end:**
+1. Open `http://localhost:8080/auth-service/login.html`, log in as
+   `mining.recorder` / `Password123!`
+2. Go to `http://localhost:8080/mining-accident-service/web/submit`,
+   submit an incident
+3. Log out (clear localStorage / open an incognito window), log in as
+   `mining.supervisor` / `Password123!`
+4. Go to `http://localhost:8080/mining-accident-service/web/queue`,
+   approve/reject/request-corrections on it
+
+**REST API (for Postman/testing):**
+
+| Method | Path | Who |
+|---|---|---|
+| POST | `/api/incidents` | WARD_RECORDER (own ward/hazard) |
+| GET | `/api/incidents` | any role - results scoped automatically |
+| GET | `/api/incidents/{id}` | any role - scoped automatically |
+| PUT | `/api/incidents/{id}` | recorder, own record, PENDING/CORRECTIONS_REQUESTED only |
+| DELETE | `/api/incidents/{id}` | recorder, own record, not yet APPROVED |
+| POST | `/api/incidents/{id}/approve` | supervisor, own hazard |
+| POST | `/api/incidents/{id}/reject` | supervisor, own hazard, body: `{"notes": "..."}` |
+| POST | `/api/incidents/{id}/request-corrections` | supervisor, own hazard, body: `{"notes": "..."}` |
+
+Swagger UI: `http://localhost:8082/swagger-ui.html` (direct, or through
+the gateway once routed).
+
+## common module - shared library (NOT a running service)
+
+`Role`, `Hazard`, `IncidentStatus`, `Severity`, `AuditAction` enums;
+`BaseIncident` / `BaseAuditLog` (JPA MappedSuperclass - shared fields);
+`RequestContext` + `RequestContextResolver` (reads the gateway's
+X-User-* headers); `HazardScopeGuard` (the actual RBAC/scoping checks).
+
+This is a compile-time dependency only - no hazard service calls
+another hazard service over HTTP, each still has its own schema, own
+REST API, own deployable jar. It's the same pattern as sharing a
+DTO/utils jar in any production microservice system, and keeps the
+RBAC logic identical and correct across all five services instead of
+each person re-implementing (and possibly getting wrong) the same
+scoping rules from scratch.
+
+## Checklist for building another hazard service (copy mining-accident-service)
+
+1. Copy the whole `mining-accident-service` folder, rename it to
+   `<yourhazard>-service`, and do a project-wide rename of the Java
+   package `zw.ac.uz.dpdms.mining` to `zw.ac.uz.dpdms.<yourhazard>`
+   (IntelliJ: right-click the package > Refactor > Rename handles this
+   safely, don't do it with find-replace on raw text).
+2. In `pom.xml`: change `<artifactId>` to `<yourhazard>-service`.
+3. In `application.yml`: change `server.port` to a free port (8083,
+   8084, 8085, 8086 - agree as a team who takes which), change the
+   datasource URL's database name to `<yourhazard>_db` (already
+   created by `mysql-init`).
+4. In your entity (e.g. `FloodIncident extends BaseIncident`): replace
+   the 5 mining-specific fields with your hazard's 5 indicators from
+   the brief, matching field types (number -> Integer/Double,
+   categorical -> your own enum, yes/no -> Boolean).
+5. In your service class: change `SERVICE_HAZARD` to your hazard's
+   `Hazard` enum value (e.g. `Hazard.FLOOD`). That one line is what
+   makes all the RBAC scoping apply correctly to your hazard - don't
+   touch the `HazardScopeGuard` calls themselves, they're already
+   correct.
+6. Update your DTOs' hazard-specific fields to match your entity.
+7. Update the Thymeleaf templates' hazard-specific form fields and
+   table columns to match.
+8. In `pom.xml` (root): uncomment your service's module line.
+9. In gateway's `application.yml`: your route already exists (all 5
+   hazard routes were pre-wired on Day 1) - nothing to change there.
+10. Seed test accounts already exist for every hazard in auth-service's
+    `DataSeeder` - use `<yourhazard>.recorder` / `<yourhazard>.supervisor`,
+    password `Password123!`.

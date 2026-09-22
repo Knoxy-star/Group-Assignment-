@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>zw.ac.uz.dpdms</groupId>
+        <artifactId>dpdms-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>common</artifactId>
+    <packaging>jar</packaging>
+    <name>common</name>
+    <description>
+        Shared library (compile-time dependency only, NOT a running
+        service) used by all five hazard services: Role/Hazard/Status
+        enums, base incident fields, and the RequestContext helper that
+        reads the X-User-* headers the gateway forwards. This keeps the
+        RBAC/scoping pattern identical across services without any
+        service depending on another service at runtime - each hazard
+        service still has its own schema, own REST API, own deployable
+        jar, and no HTTP calls to any other hazard service. This is the
+        same "shared internal library" pattern common in production
+        microservice systems (e.g. a shared DTO/enum jar) and does not
+        compromise independent deployability.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.persistence</groupId>
+            <artifactId>jakarta.persistence-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+    </dependencies>
+</project>
