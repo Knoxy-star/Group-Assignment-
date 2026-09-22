@@ -47,47 +47,47 @@ public class MiningAccidentController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<IncidentResponse> getById(HttpServletRequest request, @PathVariable Long id) {
+    public ResponseEntity<IncidentResponse> getById(HttpServletRequest request, @PathVariable("id") Long id) {
         RequestContext ctx = contextResolver.resolve(request);
         return ResponseEntity.ok(service.getById(ctx, id));
     }
 
     @GetMapping
     public ResponseEntity<List<IncidentResponse>> list(HttpServletRequest request,
-                                                         @RequestParam(required = false) IncidentStatus status) {
+                                                         @RequestParam(value = "status", required = false) IncidentStatus status) {
         RequestContext ctx = contextResolver.resolve(request);
         return ResponseEntity.ok(service.list(ctx, status));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<IncidentResponse> update(HttpServletRequest request, @PathVariable Long id,
+    public ResponseEntity<IncidentResponse> update(HttpServletRequest request, @PathVariable("id") Long id,
                                                      @Valid @RequestBody IncidentUpdateRequest req) {
         RequestContext ctx = contextResolver.resolve(request);
         return ResponseEntity.ok(service.update(ctx, id, req));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(HttpServletRequest request, @PathVariable Long id) {
+    public ResponseEntity<Void> delete(HttpServletRequest request, @PathVariable("id") Long id) {
         RequestContext ctx = contextResolver.resolve(request);
         service.delete(ctx, id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/approve")
-    public ResponseEntity<IncidentResponse> approve(HttpServletRequest request, @PathVariable Long id) {
+    public ResponseEntity<IncidentResponse> approve(HttpServletRequest request, @PathVariable("id") Long id) {
         RequestContext ctx = contextResolver.resolve(request);
         return ResponseEntity.ok(service.approve(ctx, id));
     }
 
     @PostMapping("/{id}/reject")
-    public ResponseEntity<IncidentResponse> reject(HttpServletRequest request, @PathVariable Long id,
+    public ResponseEntity<IncidentResponse> reject(HttpServletRequest request, @PathVariable("id") Long id,
                                                       @Valid @RequestBody DecisionRequest req) {
         RequestContext ctx = contextResolver.resolve(request);
         return ResponseEntity.ok(service.reject(ctx, id, req));
     }
 
     @PostMapping("/{id}/request-corrections")
-    public ResponseEntity<IncidentResponse> requestCorrections(HttpServletRequest request, @PathVariable Long id,
+    public ResponseEntity<IncidentResponse> requestCorrections(HttpServletRequest request, @PathVariable("id") Long id,
                                                                   @Valid @RequestBody DecisionRequest req) {
         RequestContext ctx = contextResolver.resolve(request);
         return ResponseEntity.ok(service.requestCorrections(ctx, id, req));

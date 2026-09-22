@@ -96,7 +96,7 @@
 <div id="message"></div>
 <p><a href="/mining-accident-service/web/my-submissions">View my submissions</a></p>
 
-<script th:src="@{/js/api.js}"></script>
+<script src="/mining-accident-service/js/api.js"></script>
 <script>
     if (requireAuth(['WARD_RECORDER'])) {
         document.getElementById('whoami').textContent = getUsername();
