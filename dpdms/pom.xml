@@ -15,8 +15,9 @@
         <java.version>17</java.version>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.parameters>true</maven.compiler.parameters>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-boot.version>3.3.4</spring-boot.version>
+        <spring-boot.version>3.3.13</spring-boot.version>
         <spring-cloud.version>2023.0.3</spring-cloud.version>
     </properties>
 
@@ -32,10 +33,12 @@
         being reachable at runtime (not at build time).
     -->
     <modules>
+        <module>common</module>
         <module>discovery-service</module>
         <module>gateway</module>
         <module>auth-service</module>
-        <!-- <module>flood-service</module> -->
+        <module>mining-accident-service</module>
+        <module>flood-service</module>
         <!-- <module>drought-service</module> -->
         <!-- <module>fire-service</module> -->
         <!-- <module>zoonotic-disease-service</module> -->
@@ -44,7 +47,6 @@
         <!-- <module>alert-service</module> -->
         <!-- <module>dashboard-service</module> -->
     </modules>
-
     <dependencyManagement>
         <dependencies>
             <dependency>
