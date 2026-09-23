@@ -38,7 +38,7 @@
         <module>gateway</module>
         <module>auth-service</module>
         <module>mining-accident-service</module>
-        <!-- <module>flood-service</module> -->
+        <module>flood-service</module>
         <!-- <module>drought-service</module> -->
         <!-- <module>fire-service</module> -->
         <!-- <module>zoonotic-disease-service</module> -->
@@ -47,7 +47,6 @@
         <!-- <module>alert-service</module> -->
         <!-- <module>dashboard-service</module> -->
     </modules>
-
     <dependencyManagement>
         <dependencies>
             <dependency>
