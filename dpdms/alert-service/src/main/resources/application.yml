@@ -1,0 +1,75 @@
+server:
+  port: 8087
+
+spring:
+  application:
+    name: alert-service
+  datasource:
+    url: jdbc:mysql://localhost:3306/alert_db?createDatabaseIfNotExist=true
+    username: ${MYSQL_APP_USER:dpdms}
+    password: ${MYSQL_APP_PASSWORD:dpdms_pass}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+  thymeleaf:
+    cache: false
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        # A message that still fails after 3 tries is dropped instead of
+        # being redelivered forever (a "poison message" loop).
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 2s
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+dpdms:
+  alerts:
+    # Hazard services publish to this exchange with routing key
+    # "incident.approved.<hazard>", e.g. incident.approved.flood
+    exchange: dpdms.incidents
+    queue: alert-service.incident-approved
+    routing-key: incident.approved.#
+    # Only incidents at or above this severity send a notification.
+    # Lower ones are still recorded, with status SUPPRESSED.
+    # CHECK THE BRIEF and change this if it says e.g. HIGH and CRITICAL only.
+    min-severity: ${ALERT_MIN_SEVERITY:LOW}
+
+  whatsapp:
+    # false = messages are only written to the log (safe default for dev).
+    # Set the WHATSAPP_* values as environment variables in the IntelliJ
+    # run configuration - never type the token into this file.
+    enabled: ${WHATSAPP_ENABLED:false}
+    api-version: ${WHATSAPP_API_VERSION:v22.0}
+    phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
+    access-token: ${WHATSAPP_ACCESS_TOKEN:}
+    # Comma-separated, international format, no + or spaces: 2637XXXXXXXX
+    recipients: ${WHATSAPP_RECIPIENTS:}
+    # template = send an approved template (hello_world works out of the box)
+    # text     = send the full alert text (only delivered inside Meta's
+    #            24-hour window after the recipient has messaged your number)
+    message-type: ${WHATSAPP_MESSAGE_TYPE:template}
+    template-name: ${WHATSAPP_TEMPLATE_NAME:hello_world}
+    template-language: ${WHATSAPP_TEMPLATE_LANGUAGE:en_US}

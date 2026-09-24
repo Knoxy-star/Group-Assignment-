@@ -1,47 +1,41 @@
-package zw.ac.uz.dpdms.flood.service;
+package zw.ac.uz.dpdms.zoonotic.service;
 
 import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.HazardScopeGuard;
-import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
-import zw.ac.uz.dpdms.common.IncidentEventPublisher;
 import zw.ac.uz.dpdms.common.IncidentStatus;
 import zw.ac.uz.dpdms.common.RequestContext;
-import zw.ac.uz.dpdms.flood.dto.DecisionRequest;
-import zw.ac.uz.dpdms.flood.dto.IncidentCreateRequest;
-import zw.ac.uz.dpdms.flood.dto.IncidentResponse;
-import zw.ac.uz.dpdms.flood.dto.IncidentUpdateRequest;
-import zw.ac.uz.dpdms.flood.entity.FloodIncident;
-import zw.ac.uz.dpdms.flood.entity.FloodAuditLog;
-import zw.ac.uz.dpdms.flood.repository.FloodIncidentRepository;
-import zw.ac.uz.dpdms.flood.repository.FloodAuditLogRepository;
+import zw.ac.uz.dpdms.zoonotic.dto.DecisionRequest;
+import zw.ac.uz.dpdms.zoonotic.dto.IncidentCreateRequest;
+import zw.ac.uz.dpdms.zoonotic.dto.IncidentResponse;
+import zw.ac.uz.dpdms.zoonotic.dto.IncidentUpdateRequest;
+import zw.ac.uz.dpdms.zoonotic.entity.ZoonoticDiseaseIncident;
+import zw.ac.uz.dpdms.zoonotic.entity.ZoonoticAuditLog;
+import zw.ac.uz.dpdms.zoonotic.repository.ZoonoticDiseaseIncidentRepository;
+import zw.ac.uz.dpdms.zoonotic.repository.ZoonoticAuditLogRepository;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
 @Service
-public class FloodService {
+public class ZoonoticDiseaseService {
 
     // Fixed for this service. When copying this pattern for another
     // hazard service, this is the ONE line that changes to that
     // hazard's own Hazard enum value.
-    private static final Hazard SERVICE_HAZARD = Hazard.FLOOD;
+    private static final Hazard SERVICE_HAZARD = Hazard.ZOONOTIC_DISEASE;
 
-    private final FloodIncidentRepository incidentRepository;
-    private final FloodAuditLogRepository auditLogRepository;
+    private final ZoonoticDiseaseIncidentRepository incidentRepository;
+    private final ZoonoticAuditLogRepository auditLogRepository;
     private final HazardScopeGuard scopeGuard;
-    private final IncidentEventPublisher eventPublisher;
 
-    public FloodService(FloodIncidentRepository incidentRepository,
-                                  FloodAuditLogRepository auditLogRepository,
-                                  HazardScopeGuard scopeGuard,
-                                  IncidentEventPublisher eventPublisher) {
+    public ZoonoticDiseaseService(ZoonoticDiseaseIncidentRepository incidentRepository,
+                                  ZoonoticAuditLogRepository auditLogRepository,
+                                  HazardScopeGuard scopeGuard) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
-        this.eventPublisher = eventPublisher;
     }
 
     // ---------- CREATE ----------
@@ -49,7 +43,7 @@ public class FloodService {
     public IncidentResponse create(RequestContext ctx, IncidentCreateRequest req) {
         scopeGuard.assertCanCreate(ctx, SERVICE_HAZARD);
 
-        FloodIncident incident = new FloodIncident();
+        ZoonoticDiseaseIncident incident = new ZoonoticDiseaseIncident();
         incident.setWard(ctx.ward());               // from the token, never from client input
         incident.setReporterId(ctx.userId());        // from the token, never from client input
         incident.setDistrict(req.district());
@@ -59,11 +53,11 @@ public class FloodService {
         incident.setLatitude(req.latitude());
         incident.setLongitude(req.longitude());
         incident.setStatus(IncidentStatus.PENDING);
-        incident.setPeakWaterLevelMetres(req.peakWaterLevelMetres());
-        incident.setCatchment(req.catchment());
-        incident.setHouseholdsDisplaced(req.householdsDisplaced());
-        incident.setAreaFloodedHectares(req.areaFloodedHectares());
-        incident.setInundationDurationDays(req.inundationDurationDays());
+        incident.setDiseaseName(req.diseaseName());
+        incident.setAnimalSpecies(req.animalSpecies());
+        incident.setConfirmedAnimalCases(req.confirmedAnimalCases());
+        incident.setOutbreakClassification(req.outbreakClassification());
+        incident.setHumanCasesCount(req.humanCasesCount());
 
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.SUBMITTED, ctx, "Initial submission");
@@ -74,7 +68,7 @@ public class FloodService {
     // ---------- READ ----------
 
     public IncidentResponse getById(RequestContext ctx, Long id) {
-        FloodIncident incident = findOrThrow(id);
+        ZoonoticDiseaseIncident incident = findOrThrow(id);
         scopeGuard.assertCanView(ctx, SERVICE_HAZARD, incident.getWard(), incident.getReporterId(), incident.getStatus());
         return IncidentResponse.from(incident);
     }
@@ -98,14 +92,14 @@ public class FloodService {
 
         if (ctx.isSupervisor()) {
             scopeGuard.assertCanDecide(ctx, SERVICE_HAZARD); // reuses the hazard-match check; supervisors read their own hazard's queue
-            List<FloodIncident> results = (statusFilter != null)
+            List<ZoonoticDiseaseIncident> results = (statusFilter != null)
                     ? incidentRepository.findByStatusOrderByCreatedAtDesc(statusFilter)
                     : incidentRepository.findAllByOrderByCreatedAtDesc();
             return results.stream().map(IncidentResponse::from).toList();
         }
 
         if (ctx.isProvincialAdmin()) {
-            List<FloodIncident> results = (statusFilter != null)
+            List<ZoonoticDiseaseIncident> results = (statusFilter != null)
                     ? incidentRepository.findByStatusOrderByCreatedAtDesc(statusFilter)
                     : incidentRepository.findAllByOrderByCreatedAtDesc();
             return results.stream().map(IncidentResponse::from).toList();
@@ -123,7 +117,7 @@ public class FloodService {
 
     public IncidentResponse update(RequestContext ctx, Long id, IncidentUpdateRequest req) {
         scopeGuard.assertNotNationalViewer(ctx);
-        FloodIncident incident = findOrThrow(id);
+        ZoonoticDiseaseIncident incident = findOrThrow(id);
         scopeGuard.assertCanModifyOwnRecord(ctx, SERVICE_HAZARD, incident.getWard(), incident.getReporterId());
 
         if (incident.getStatus() != IncidentStatus.PENDING && incident.getStatus() != IncidentStatus.CORRECTIONS_REQUESTED) {
@@ -138,11 +132,11 @@ public class FloodService {
         incident.setSeverity(req.severity());
         incident.setLatitude(req.latitude());
         incident.setLongitude(req.longitude());
-        incident.setPeakWaterLevelMetres(req.peakWaterLevelMetres());
-        incident.setCatchment(req.catchment());
-        incident.setHouseholdsDisplaced(req.householdsDisplaced());
-        incident.setAreaFloodedHectares(req.areaFloodedHectares());
-        incident.setInundationDurationDays(req.inundationDurationDays());
+        incident.setDiseaseName(req.diseaseName());
+        incident.setAnimalSpecies(req.animalSpecies());
+        incident.setConfirmedAnimalCases(req.confirmedAnimalCases());
+        incident.setOutbreakClassification(req.outbreakClassification());
+        incident.setHumanCasesCount(req.humanCasesCount());
 
         // Editing always resets the record back into the review queue.
         incident.setStatus(IncidentStatus.PENDING);
@@ -159,7 +153,7 @@ public class FloodService {
 
     public void delete(RequestContext ctx, Long id) {
         scopeGuard.assertNotNationalViewer(ctx);
-        FloodIncident incident = findOrThrow(id);
+        ZoonoticDiseaseIncident incident = findOrThrow(id);
         scopeGuard.assertCanModifyOwnRecord(ctx, SERVICE_HAZARD, incident.getWard(), incident.getReporterId());
 
         if (incident.getStatus() == IncidentStatus.APPROVED) {
@@ -174,7 +168,7 @@ public class FloodService {
 
     public IncidentResponse approve(RequestContext ctx, Long id) {
         scopeGuard.assertCanDecide(ctx, SERVICE_HAZARD);
-        FloodIncident incident = findOrThrow(id);
+        ZoonoticDiseaseIncident incident = findOrThrow(id);
         assertPending(incident);
 
         incident.setStatus(IncidentStatus.APPROVED);
@@ -182,52 +176,12 @@ public class FloodService {
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.APPROVED, ctx, "Approved by supervisor");
 
-        // Tell alert-service (via RabbitMQ). Never throws: if RabbitMQ is
-        // down the approval above is still saved and a warning is logged.
-        eventPublisher.publishApproved(new IncidentApprovedEvent(
-                SERVICE_HAZARD,
-                incident.getId(),
-                incident.getWard(),
-                incident.getDistrict(),
-                incident.getProvince(),
-                incident.getSeverity(),
-                incident.getOccurredAt(),
-                alertSummary(incident)));
-
         return IncidentResponse.from(incident);
-    }
-
-    /**
-     * One-line, hazard-specific summary for the alert message, built from
-     * the flood indicators, e.g. "Mazowe catchment, peak 3.2 m, 45
-     * households displaced, 120.0 ha flooded for 3 days". Skips any
-     * indicator that is missing.
-     */
-    private String alertSummary(FloodIncident incident) {
-        List<String> parts = new ArrayList<>();
-        if (incident.getCatchment() != null) {
-            String name = incident.getCatchment().name();
-            parts.add(name.charAt(0) + name.substring(1).toLowerCase() + " catchment");
-        }
-        if (incident.getPeakWaterLevelMetres() != null) {
-            parts.add("peak " + incident.getPeakWaterLevelMetres() + " m");
-        }
-        if (incident.getHouseholdsDisplaced() != null) {
-            parts.add(incident.getHouseholdsDisplaced() + " households displaced");
-        }
-        if (incident.getAreaFloodedHectares() != null) {
-            String area = incident.getAreaFloodedHectares() + " ha flooded";
-            if (incident.getInundationDurationDays() != null) {
-                area += " for " + incident.getInundationDurationDays() + " days";
-            }
-            parts.add(area);
-        }
-        return String.join(", ", parts);
     }
 
     public IncidentResponse reject(RequestContext ctx, Long id, DecisionRequest req) {
         scopeGuard.assertCanDecide(ctx, SERVICE_HAZARD);
-        FloodIncident incident = findOrThrow(id);
+        ZoonoticDiseaseIncident incident = findOrThrow(id);
         assertPending(incident);
 
         incident.setStatus(IncidentStatus.REJECTED);
@@ -240,7 +194,7 @@ public class FloodService {
 
     public IncidentResponse requestCorrections(RequestContext ctx, Long id, DecisionRequest req) {
         scopeGuard.assertCanDecide(ctx, SERVICE_HAZARD);
-        FloodIncident incident = findOrThrow(id);
+        ZoonoticDiseaseIncident incident = findOrThrow(id);
         assertPending(incident);
 
         incident.setStatus(IncidentStatus.CORRECTIONS_REQUESTED);
@@ -253,19 +207,19 @@ public class FloodService {
 
     // ---------- helpers ----------
 
-    private FloodIncident findOrThrow(Long id) {
+    private ZoonoticDiseaseIncident findOrThrow(Long id) {
         return incidentRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Incident not found: " + id));
     }
 
-    private void assertPending(FloodIncident incident) {
+    private void assertPending(ZoonoticDiseaseIncident incident) {
         if (incident.getStatus() != IncidentStatus.PENDING) {
             throw new IllegalStateException("Only PENDING incidents can be decided on (current status: " + incident.getStatus() + ")");
         }
     }
 
     private void writeAudit(Long incidentId, AuditAction action, RequestContext ctx, String notes) {
-        FloodAuditLog log = new FloodAuditLog();
+        ZoonoticAuditLog log = new ZoonoticAuditLog();
         log.setIncidentId(incidentId);
         log.setAction(action);
         log.setPerformedByUserId(ctx.userId());
