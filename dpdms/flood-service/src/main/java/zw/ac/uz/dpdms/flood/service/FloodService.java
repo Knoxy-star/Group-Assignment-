@@ -1,5 +1,6 @@
 package zw.ac.uz.dpdms.flood.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
@@ -34,14 +35,20 @@ public class FloodService {
     private final HazardScopeGuard scopeGuard;
     private final IncidentEventPublisher eventPublisher;
 
+    // Flood alerting criterion (brief: "a flood above a danger threshold").
+    // Configurable in application.yml / FLOOD_DANGER_LEVEL_M env var.
+    private final double dangerLevelMetres;
+
     public FloodService(FloodIncidentRepository incidentRepository,
                                   FloodAuditLogRepository auditLogRepository,
                                   HazardScopeGuard scopeGuard,
-                                  IncidentEventPublisher eventPublisher) {
+                                  IncidentEventPublisher eventPublisher,
+                                  @Value("${dpdms.alerts.flood.danger-level-m:3.0}") double dangerLevelMetres) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
         this.eventPublisher = eventPublisher;
+        this.dangerLevelMetres = dangerLevelMetres;
     }
 
     // ---------- CREATE ----------
@@ -192,9 +199,32 @@ public class FloodService {
                 incident.getProvince(),
                 incident.getSeverity(),
                 incident.getOccurredAt(),
-                alertSummary(incident)));
+                alertSummary(incident),
+                meetsAlertCriteria(incident),
+                alertCriteriaReason(incident)));
 
         return IncidentResponse.from(incident);
+    }
+
+    /**
+     * Flood alerting criterion: peak water level at or above the danger
+     * level. Kept here, in flood-service, because only this service
+     * understands flood indicators; alert-service just acts on the result.
+     */
+    private boolean meetsAlertCriteria(FloodIncident incident) {
+        Double peak = incident.getPeakWaterLevelMetres();
+        return peak != null && peak >= dangerLevelMetres;
+    }
+
+    /** Human-readable explanation stored in the alert log either way. */
+    private String alertCriteriaReason(FloodIncident incident) {
+        Double peak = incident.getPeakWaterLevelMetres();
+        if (peak == null) {
+            return "No peak water level recorded";
+        }
+        return "Peak water level " + peak + " m is "
+                + (peak >= dangerLevelMetres ? "at or above" : "below")
+                + " the " + dangerLevelMetres + " m danger level";
     }
 
     /**

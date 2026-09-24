@@ -68,6 +68,10 @@ public class Alert {
     @Column(length = 1000)
     private String deliveryDetail;
 
+    /** Why this incident did (or did not) trigger a notification. */
+    @Column(length = 500)
+    private String alertReason;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime receivedAt;
 

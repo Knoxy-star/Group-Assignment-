@@ -21,12 +21,13 @@ public record AlertResponse(
         String channel,
         DeliveryStatus deliveryStatus,
         String deliveryDetail,
+        String alertReason,
         LocalDateTime receivedAt
 ) {
     public static AlertResponse from(Alert a) {
         return new AlertResponse(
                 a.getId(), a.getHazard(), a.getIncidentId(), a.getWard(), a.getDistrict(), a.getProvince(),
                 a.getSeverity(), a.getOccurredAt(), a.getSummary(), a.getMessage(), a.getChannel(),
-                a.getDeliveryStatus(), a.getDeliveryDetail(), a.getReceivedAt());
+                a.getDeliveryStatus(), a.getDeliveryDetail(), a.getAlertReason(), a.getReceivedAt());
     }
 }

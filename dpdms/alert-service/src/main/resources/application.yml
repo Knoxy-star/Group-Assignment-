@@ -52,10 +52,12 @@ dpdms:
     exchange: dpdms.incidents
     queue: alert-service.incident-approved
     routing-key: incident.approved.#
-    # Only incidents at or above this severity send a notification.
-    # Lower ones are still recorded, with status SUPPRESSED.
-    # CHECK THE BRIEF and change this if it says e.g. HIGH and CRITICAL only.
-    min-severity: ${ALERT_MIN_SEVERITY:LOW}
+    # Brief: alerts go out when an incident "meets defined alerting
+    # criteria". Each hazard service checks its own indicators and sends
+    # alertCriteriaMet=true/false in the event. As a safety net, anything
+    # at or above this severity ALWAYS alerts. Incidents that don't
+    # qualify are still recorded, with status SUPPRESSED.
+    always-alert-severity: ${ALERT_ALWAYS_SEVERITY:CRITICAL}
 
   whatsapp:
     # false = messages are only written to the log (safe default for dev).

@@ -14,6 +14,7 @@ import zw.ac.uz.dpdms.alert.notify.DeliveryResult;
 import zw.ac.uz.dpdms.alert.repository.AlertRepository;
 import zw.ac.uz.dpdms.common.AccessDeniedException;
 import zw.ac.uz.dpdms.common.RequestContext;
+import zw.ac.uz.dpdms.common.Severity;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -48,12 +49,15 @@ public class AlertService {
             return;
         }
 
-        String message = formatMessage(event);
+        String reason = alertReason(event);
+        String message = formatMessage(event, reason);
 
         DeliveryResult result;
-        if (event.severity().ordinal() < props.minSeverity().ordinal()) {
+        if (reason == null) {
             result = new DeliveryResult(DeliveryStatus.SUPPRESSED,
-                    "Severity " + event.severity() + " is below the alert threshold " + props.minSeverity());
+                    "Did not meet the " + event.hazard().name().replace('_', ' ')
+                            + " alerting criteria"
+                            + (event.alertReason() != null ? " (" + event.alertReason() + ")" : ""));
         } else {
             result = notifier.send(message);
         }
@@ -71,6 +75,7 @@ public class AlertService {
         alert.setChannel(notifier.channelName());
         alert.setDeliveryStatus(result.status());
         alert.setDeliveryDetail(result.detail());
+        alert.setAlertReason(reason != null ? reason : event.alertReason());
         repository.save(alert);
 
         log.info("Recorded alert for {} incident {} - {}", event.hazard(), event.incidentId(), result.status());
@@ -100,7 +105,26 @@ public class AlertService {
         return alerts.stream().map(AlertResponse::from).toList();
     }
 
-    private String formatMessage(IncidentApprovedEvent e) {
+    /**
+     * Decides whether this incident should notify anyone, and why.
+     * Returns the reason, or null if it should be SUPPRESSED.
+     *  1. The hazard service says its hazard-specific criteria are met.
+     *  2. Safety net: severity at or above dpdms.alerts.always-alert-severity.
+     */
+    private String alertReason(IncidentApprovedEvent e) {
+        if (Boolean.TRUE.equals(e.alertCriteriaMet())) {
+            return (e.alertReason() != null && !e.alertReason().isBlank())
+                    ? e.alertReason().trim()
+                    : "Met the " + e.hazard().name().replace('_', ' ') + " alerting criteria";
+        }
+        Severity always = props.alwaysAlertSeverity();
+        if (always != null && e.severity().ordinal() >= always.ordinal()) {
+            return "Severity " + e.severity() + " (always alerts at " + always + " or above)";
+        }
+        return null;
+    }
+
+    private String formatMessage(IncidentApprovedEvent e, String reason) {
         StringBuilder sb = new StringBuilder();
         sb.append("DPDMS ALERT: ").append(e.hazard().name().replace('_', ' '))
           .append(" (").append(e.severity()).append(")");
@@ -119,6 +143,9 @@ public class AlertService {
         }
         if (e.summary() != null && !e.summary().isBlank()) {
             sb.append(" ").append(e.summary().trim());
+        }
+        if (reason != null) {
+            sb.append(" Why: ").append(reason).append(".");
         }
         sb.append(" [Incident #").append(e.incidentId()).append("]");
         String text = sb.toString();

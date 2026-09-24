@@ -34,3 +34,12 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+dpdms:
+  alerts:
+    flood:
+      # Brief: alert on "a flood above a danger threshold". An approved
+      # flood with peak water level at or above this (metres) is marked
+      # as meeting the alerting criteria. Assumed value - change here or
+      # via the FLOOD_DANGER_LEVEL_M environment variable.
+      danger-level-m: ${FLOOD_DANGER_LEVEL_M:3.0}
