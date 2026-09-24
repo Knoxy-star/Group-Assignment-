@@ -8,7 +8,7 @@ import zw.ac.uz.dpdms.alert.config.AlertProperties;
 import zw.ac.uz.dpdms.alert.dto.AlertResponse;
 import zw.ac.uz.dpdms.alert.entity.Alert;
 import zw.ac.uz.dpdms.alert.entity.DeliveryStatus;
-import zw.ac.uz.dpdms.alert.event.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
 import zw.ac.uz.dpdms.alert.notify.AlertNotifier;
 import zw.ac.uz.dpdms.alert.notify.DeliveryResult;
 import zw.ac.uz.dpdms.alert.repository.AlertRepository;

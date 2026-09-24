@@ -1,7 +1,4 @@
-package zw.ac.uz.dpdms.alert.event;
-
-import zw.ac.uz.dpdms.common.Hazard;
-import zw.ac.uz.dpdms.common.Severity;
+package zw.ac.uz.dpdms.common;
 
 import java.time.LocalDateTime;
 
@@ -21,8 +18,10 @@ import java.time.LocalDateTime;
  *   "summary": "Mazowe catchment, peak 3.2 m, 45 households displaced"
  * }
  *
- * Once the team agrees on it, move this record into the common module
- * so every hazard service publishes exactly the same shape.
+ * Lives in common so every hazard service publishes exactly the same
+ * shape and alert-service (or any future consumer, e.g. report-service)
+ * reads exactly the same shape. Hazard services send it through
+ * IncidentEventPublisher; they never build the JSON by hand.
  */
 public record IncidentApprovedEvent(
         Hazard hazard,

@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.HazardScopeGuard;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentEventPublisher;
 import zw.ac.uz.dpdms.common.IncidentStatus;
 import zw.ac.uz.dpdms.common.RequestContext;
 import zw.ac.uz.dpdms.flood.dto.DecisionRequest;
@@ -15,6 +17,7 @@ import zw.ac.uz.dpdms.flood.entity.FloodAuditLog;
 import zw.ac.uz.dpdms.flood.repository.FloodIncidentRepository;
 import zw.ac.uz.dpdms.flood.repository.FloodAuditLogRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -29,13 +32,16 @@ public class FloodService {
     private final FloodIncidentRepository incidentRepository;
     private final FloodAuditLogRepository auditLogRepository;
     private final HazardScopeGuard scopeGuard;
+    private final IncidentEventPublisher eventPublisher;
 
     public FloodService(FloodIncidentRepository incidentRepository,
                                   FloodAuditLogRepository auditLogRepository,
-                                  HazardScopeGuard scopeGuard) {
+                                  HazardScopeGuard scopeGuard,
+                                  IncidentEventPublisher eventPublisher) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
+        this.eventPublisher = eventPublisher;
     }
 
     // ---------- CREATE ----------
@@ -176,7 +182,47 @@ public class FloodService {
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.APPROVED, ctx, "Approved by supervisor");
 
+        // Tell alert-service (via RabbitMQ). Never throws: if RabbitMQ is
+        // down the approval above is still saved and a warning is logged.
+        eventPublisher.publishApproved(new IncidentApprovedEvent(
+                SERVICE_HAZARD,
+                incident.getId(),
+                incident.getWard(),
+                incident.getDistrict(),
+                incident.getProvince(),
+                incident.getSeverity(),
+                incident.getOccurredAt(),
+                alertSummary(incident)));
+
         return IncidentResponse.from(incident);
+    }
+
+    /**
+     * One-line, hazard-specific summary for the alert message, built from
+     * the flood indicators, e.g. "Mazowe catchment, peak 3.2 m, 45
+     * households displaced, 120.0 ha flooded for 3 days". Skips any
+     * indicator that is missing.
+     */
+    private String alertSummary(FloodIncident incident) {
+        List<String> parts = new ArrayList<>();
+        if (incident.getCatchment() != null) {
+            String name = incident.getCatchment().name();
+            parts.add(name.charAt(0) + name.substring(1).toLowerCase() + " catchment");
+        }
+        if (incident.getPeakWaterLevelMetres() != null) {
+            parts.add("peak " + incident.getPeakWaterLevelMetres() + " m");
+        }
+        if (incident.getHouseholdsDisplaced() != null) {
+            parts.add(incident.getHouseholdsDisplaced() + " households displaced");
+        }
+        if (incident.getAreaFloodedHectares() != null) {
+            String area = incident.getAreaFloodedHectares() + " ha flooded";
+            if (incident.getInundationDurationDays() != null) {
+                area += " for " + incident.getInundationDurationDays() + " days";
+            }
+            parts.add(area);
+        }
+        return String.join(", ", parts);
     }
 
     public IncidentResponse reject(RequestContext ctx, Long id, DecisionRequest req) {

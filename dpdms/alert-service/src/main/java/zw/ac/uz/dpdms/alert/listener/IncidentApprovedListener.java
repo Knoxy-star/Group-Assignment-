@@ -2,7 +2,7 @@ package zw.ac.uz.dpdms.alert.listener;
 
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
-import zw.ac.uz.dpdms.alert.event.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
 import zw.ac.uz.dpdms.alert.service.AlertService;
 
 /**
