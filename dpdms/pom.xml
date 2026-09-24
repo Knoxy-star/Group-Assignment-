@@ -39,7 +39,7 @@
         <module>auth-service</module>
         <module>mining-accident-service</module>
         <module>flood-service</module>
-        <!-- <module>drought-service</module> -->
+         <module>drought-service</module>
         <!-- <module>fire-service</module> -->
         <!-- <module>zoonotic-disease-service</module> -->
         <!-- <module>mining-accident-service</module> -->
