@@ -1,5 +1,6 @@
 package zw.ac.uz.dpdms.alert.entity;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -7,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -16,6 +19,8 @@ import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.Severity;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * One row per approved incident. The unique constraint on
@@ -57,7 +62,7 @@ public class Alert {
     @Column(nullable = false, length = 1000)
     private String message;
 
-    /** Which notifier handled it, e.g. "LOG" or "WHATSAPP". */
+    /** Channels used, e.g. "EMAIL, WHATSAPP", "LOG" or "NONE" (suppressed). */
     @Column(nullable = false)
     private String channel;
 
@@ -75,8 +80,18 @@ public class Alert {
     @Column(nullable = false, updatable = false)
     private LocalDateTime receivedAt;
 
+    /** One row per channel per recipient - see AlertDelivery. */
+    @OneToMany(mappedBy = "alert", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
+    private List<AlertDelivery> deliveries = new ArrayList<>();
+
     @PrePersist
     void onCreate() {
         receivedAt = LocalDateTime.now();
+    }
+
+    public void addDelivery(AlertDelivery delivery) {
+        delivery.setAlert(this);
+        deliveries.add(delivery);
     }
 }

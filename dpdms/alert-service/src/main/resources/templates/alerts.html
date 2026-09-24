@@ -16,6 +16,9 @@
         #empty, #error { margin-top: 20px; }
         #error { color: #b00020; }
         .detail { color: #666; font-size: 12px; }
+        .log { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; color: #444; }
+        .log li { margin-top: 3px; white-space: nowrap; }
+        .log .badge { font-size: 10px; padding: 1px 5px; }
     </style>
 </head>
 <body>
@@ -39,6 +42,19 @@
     function esc(v) {
         return String(v == null ? '' : v)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Delivery log: one line per channel per recipient, with time and status.
+    function deliveryLog(deliveries) {
+        if (!deliveries || deliveries.length === 0) {
+            return '';
+        }
+        return '<ul class="log">' + deliveries.map(function (d) {
+            const when = d.attemptedAt ? new Date(d.attemptedAt).toLocaleTimeString() : '';
+            return '<li title="' + esc(d.detail) + '">' + esc(d.channel) + ' &rarr; ' + esc(d.recipient) +
+                ' <span class="badge ' + esc(d.status) + '">' + esc(d.status.replace('_', ' ')) + '</span> ' +
+                esc(when) + '</li>';
+        }).join('') + '</ul>';
     }
 
     async function loadAlerts() {
@@ -67,7 +83,8 @@
                 '<td>' + esc(a.message) + '</td>' +
                 '<td>' + esc(a.channel) + '</td>' +
                 '<td><span class="badge ' + esc(a.deliveryStatus) + '">' + esc(a.deliveryStatus.replace('_', ' ')) + '</span>' +
-                (a.deliveryDetail ? '<div class="detail">' + esc(a.deliveryDetail) + '</div>' : '') + '</td>';
+                (a.deliveryDetail ? '<div class="detail">' + esc(a.deliveryDetail) + '</div>' : '') +
+                deliveryLog(a.deliveries) + '</td>';
             tbody.appendChild(tr);
         });
         document.getElementById('alertsTable').style.display = 'table';

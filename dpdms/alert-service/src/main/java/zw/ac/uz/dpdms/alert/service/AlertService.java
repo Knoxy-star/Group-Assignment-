@@ -7,16 +7,20 @@ import org.springframework.transaction.annotation.Transactional;
 import zw.ac.uz.dpdms.alert.config.AlertProperties;
 import zw.ac.uz.dpdms.alert.dto.AlertResponse;
 import zw.ac.uz.dpdms.alert.entity.Alert;
+import zw.ac.uz.dpdms.alert.entity.AlertDelivery;
 import zw.ac.uz.dpdms.alert.entity.DeliveryStatus;
 import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
 import zw.ac.uz.dpdms.alert.notify.AlertNotifier;
 import zw.ac.uz.dpdms.alert.notify.DeliveryResult;
+import zw.ac.uz.dpdms.alert.notify.LoggingNotifier;
 import zw.ac.uz.dpdms.alert.repository.AlertRepository;
 import zw.ac.uz.dpdms.common.AccessDeniedException;
 import zw.ac.uz.dpdms.common.RequestContext;
 import zw.ac.uz.dpdms.common.Severity;
 
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -26,12 +30,16 @@ public class AlertService {
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
 
     private final AlertRepository repository;
-    private final AlertNotifier notifier;
+    private final List<AlertNotifier> notifiers;
+    private final LoggingNotifier loggingNotifier;
     private final AlertProperties props;
 
-    public AlertService(AlertRepository repository, AlertNotifier notifier, AlertProperties props) {
+    /** Spring injects every AlertNotifier bean (EmailNotifier, WhatsAppCloudNotifier, ...). */
+    public AlertService(AlertRepository repository, List<AlertNotifier> notifiers,
+                        LoggingNotifier loggingNotifier, AlertProperties props) {
         this.repository = repository;
-        this.notifier = notifier;
+        this.notifiers = notifiers;
+        this.loggingNotifier = loggingNotifier;
         this.props = props;
     }
 
@@ -52,16 +60,6 @@ public class AlertService {
         String reason = alertReason(event);
         String message = formatMessage(event, reason);
 
-        DeliveryResult result;
-        if (reason == null) {
-            result = new DeliveryResult(DeliveryStatus.SUPPRESSED,
-                    "Did not meet the " + event.hazard().name().replace('_', ' ')
-                            + " alerting criteria"
-                            + (event.alertReason() != null ? " (" + event.alertReason() + ")" : ""));
-        } else {
-            result = notifier.send(message);
-        }
-
         Alert alert = new Alert();
         alert.setHazard(event.hazard());
         alert.setIncidentId(event.incidentId());
@@ -72,13 +70,89 @@ public class AlertService {
         alert.setOccurredAt(event.occurredAt());
         alert.setSummary(event.summary());
         alert.setMessage(message);
-        alert.setChannel(notifier.channelName());
-        alert.setDeliveryStatus(result.status());
-        alert.setDeliveryDetail(result.detail());
         alert.setAlertReason(reason != null ? reason : event.alertReason());
+
+        if (reason == null) {
+            alert.setChannel("NONE");
+            alert.setDeliveryStatus(DeliveryStatus.SUPPRESSED);
+            alert.setDeliveryDetail("Did not meet the " + event.hazard().name().replace('_', ' ')
+                    + " alerting criteria"
+                    + (event.alertReason() != null ? " (" + event.alertReason() + ")" : ""));
+        } else {
+            dispatch(alert, subject(event), message);
+        }
         repository.save(alert);
 
-        log.info("Recorded alert for {} incident {} - {}", event.hazard(), event.incidentId(), result.status());
+        log.info("Recorded alert for {} incident {} - {}", event.hazard(), event.incidentId(),
+                alert.getDeliveryStatus());
+    }
+
+    /**
+     * Sends through every enabled channel, to every configured recipient,
+     * recording one AlertDelivery row per attempt. If no channel is
+     * enabled, writes to the application log instead.
+     */
+    private void dispatch(Alert alert, String subject, String message) {
+        List<AlertNotifier> active = notifiers.stream().filter(AlertNotifier::isEnabled).toList();
+
+        if (active.isEmpty()) {
+            DeliveryResult r = loggingNotifier.write(message);
+            alert.addDelivery(delivery(LoggingNotifier.CHANNEL, "application log", r));
+            alert.setChannel(LoggingNotifier.CHANNEL);
+            alert.setDeliveryStatus(r.status());
+            alert.setDeliveryDetail(r.detail());
+            return;
+        }
+
+        List<String> channels = new ArrayList<>();
+        int attempts = 0;
+        int sent = 0;
+        for (AlertNotifier notifier : active) {
+            channels.add(notifier.channelName());
+            List<String> recipients = notifier.recipients();
+            if (recipients.isEmpty()) {
+                alert.addDelivery(delivery(notifier.channelName(), "(none configured)",
+                        new DeliveryResult(DeliveryStatus.FAILED,
+                                "Channel enabled but no recipients configured")));
+                attempts++;
+                continue;
+            }
+            for (String recipient : recipients) {
+                DeliveryResult r;
+                try {
+                    r = notifier.send(recipient, subject, message);
+                } catch (Exception e) {
+                    // Notifiers shouldn't throw, but never let one channel
+                    // stop the others or cause a RabbitMQ redelivery.
+                    r = new DeliveryResult(DeliveryStatus.FAILED, String.valueOf(e.getMessage()));
+                }
+                alert.addDelivery(delivery(notifier.channelName(), notifier.displayRecipient(recipient), r));
+                attempts++;
+                if (r.status() == DeliveryStatus.SENT) {
+                    sent++;
+                }
+            }
+        }
+
+        alert.setChannel(String.join(", ", channels));
+        alert.setDeliveryStatus(attempts > 0 && sent == attempts ? DeliveryStatus.SENT : DeliveryStatus.FAILED);
+        alert.setDeliveryDetail(sent + " of " + attempts + " deliveries succeeded");
+    }
+
+    private static AlertDelivery delivery(String channel, String recipient, DeliveryResult result) {
+        AlertDelivery d = new AlertDelivery();
+        d.setChannel(channel);
+        d.setRecipient(recipient.length() <= 255 ? recipient : recipient.substring(0, 255));
+        d.setStatus(result.status());
+        String detail = result.detail();
+        d.setDetail(detail == null || detail.length() <= 1000 ? detail : detail.substring(0, 1000));
+        d.setAttemptedAt(LocalDateTime.now());
+        return d;
+    }
+
+    private static String subject(IncidentApprovedEvent e) {
+        return "DPDMS ALERT: " + e.hazard().name().replace('_', ' ') + " (" + e.severity() + ")"
+                + (e.ward() != null ? " - " + e.ward() : "");
     }
 
     /**
@@ -142,7 +216,11 @@ public class AlertService {
             sb.append(" Occurred ").append(e.occurredAt().format(WHEN)).append(".");
         }
         if (e.summary() != null && !e.summary().isBlank()) {
-            sb.append(" ").append(e.summary().trim());
+            String summary = e.summary().trim();
+            sb.append(" ").append(summary);
+            if (!summary.endsWith(".")) {
+                sb.append(".");
+            }
         }
         if (reason != null) {
             sb.append(" Why: ").append(reason).append(".");

@@ -1,12 +1,17 @@
 package zw.ac.uz.dpdms.alert.entity;
 
+/**
+ * Used both for the overall alert and for each AlertDelivery row.
+ * (Deliberately no new values were added here: MySQL stores this as an
+ * ENUM column, which Hibernate's ddl-auto=update does not widen.)
+ */
 public enum DeliveryStatus {
-    /** Sent to every recipient through the real channel (WhatsApp). */
+    /** Delivered to every recipient (overall) / to this recipient (row). */
     SENT,
-    /** Real channel attempted but at least one send failed - see deliveryDetail. */
+    /** At least one delivery failed (overall) / this one failed (row) - see detail. */
     FAILED,
-    /** WhatsApp disabled; the alert text was written to the log instead. */
+    /** No channel enabled; the alert text was written to the application log. */
     LOGGED_ONLY,
-    /** Below the configured minimum severity - recorded but not sent. */
+    /** Did not meet the alerting criteria - recorded but not sent. */
     SUPPRESSED
 }

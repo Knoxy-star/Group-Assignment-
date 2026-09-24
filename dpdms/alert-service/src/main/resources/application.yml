@@ -31,6 +31,21 @@ spring:
           enabled: true
           max-attempts: 3
           initial-interval: 2s
+  # SMTP login for email alerts. Values come from environment variables
+  # set in the IntelliJ run configuration - never type them in here.
+  # Gmail: MAIL_USERNAME = the Gmail address, MAIL_PASSWORD = a 16-char
+  # app password (Google Account > Security > App passwords).
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      "[mail.smtp.auth]": true
+      "[mail.smtp.starttls.enable]": true
+      "[mail.smtp.connectiontimeout]": 10000
+      "[mail.smtp.timeout]": 10000
+      "[mail.smtp.writetimeout]": 10000
 
 eureka:
   client:
@@ -44,6 +59,10 @@ management:
     web:
       exposure:
         include: health,info
+  health:
+    # Don't report alert-service as DOWN just because email isn't set up.
+    mail:
+      enabled: false
 
 dpdms:
   alerts:
@@ -59,8 +78,16 @@ dpdms:
     # qualify are still recorded, with status SUPPRESSED.
     always-alert-severity: ${ALERT_ALWAYS_SEVERITY:CRITICAL}
 
+  email:
+    # false = no emails sent. With email AND WhatsApp disabled, alerts are
+    # written to the application log instead (safe default for dev).
+    enabled: ${EMAIL_ENABLED:false}
+    from: ${MAIL_USERNAME:}
+    # Comma-separated email addresses
+    recipients: ${EMAIL_RECIPIENTS:}
+
   whatsapp:
-    # false = messages are only written to the log (safe default for dev).
+    # false = no WhatsApp messages sent.
     # Set the WHATSAPP_* values as environment variables in the IntelliJ
     # run configuration - never type the token into this file.
     enabled: ${WHATSAPP_ENABLED:false}

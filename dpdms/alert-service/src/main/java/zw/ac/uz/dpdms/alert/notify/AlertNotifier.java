@@ -1,19 +1,30 @@
 package zw.ac.uz.dpdms.alert.notify;
 
+import java.util.List;
+
 /**
- * Abstraction over "how an alert reaches people". AlertService only
- * depends on this interface; which implementation is active is decided
- * by configuration (dpdms.whatsapp.enabled). Adding SMS or email later
- * means writing another implementation, not changing AlertService.
+ * One delivery channel (email, WhatsApp, ...). AlertService asks every
+ * enabled channel to send to each of its recipients and records one
+ * AlertDelivery row per attempt. Adding SMS later means writing another
+ * implementation; AlertService does not change.
  *
- * Implementations must NOT throw on delivery failure - they report it
- * in the DeliveryResult, so one bad phone number can't make RabbitMQ
- * redeliver the whole message.
+ * send() must NOT throw on delivery failure - it reports the failure in
+ * the DeliveryResult, so one bad address can't make RabbitMQ redeliver
+ * the whole message (which would re-send to everyone else).
  */
 public interface AlertNotifier {
 
-    /** Short name stored with each alert, e.g. "LOG" or "WHATSAPP". */
+    /** Stored in the delivery log, e.g. "EMAIL" or "WHATSAPP". */
     String channelName();
 
-    DeliveryResult send(String messageText);
+    /** Switched on via configuration, e.g. EMAIL_ENABLED=true. */
+    boolean isEnabled();
+
+    /** Configured recipients for this channel. */
+    List<String> recipients();
+
+    /** How the recipient is written to the log (e.g. phone numbers masked). */
+    String displayRecipient(String recipient);
+
+    DeliveryResult send(String recipient, String subject, String messageText);
 }

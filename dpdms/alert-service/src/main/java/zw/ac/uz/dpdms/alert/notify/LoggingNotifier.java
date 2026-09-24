@@ -2,25 +2,24 @@ package zw.ac.uz.dpdms.alert.notify;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import zw.ac.uz.dpdms.alert.entity.DeliveryStatus;
 
-/** Default notifier (WhatsApp disabled): writes the alert to the log. */
+/**
+ * Fallback used when NO channel is enabled (the default in development):
+ * the alert is written to the application log so the flow can still be
+ * tested end to end without email or WhatsApp credentials.
+ */
 @Component
-@ConditionalOnProperty(prefix = "dpdms.whatsapp", name = "enabled", havingValue = "false", matchIfMissing = true)
-public class LoggingNotifier implements AlertNotifier {
+public class LoggingNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingNotifier.class);
 
-    @Override
-    public String channelName() {
-        return "LOG";
-    }
+    public static final String CHANNEL = "LOG";
 
-    @Override
-    public DeliveryResult send(String messageText) {
-        log.info("ALERT (WhatsApp disabled, log only): {}", messageText);
-        return new DeliveryResult(DeliveryStatus.LOGGED_ONLY, "WhatsApp disabled - written to log");
+    public DeliveryResult write(String messageText) {
+        log.info("ALERT (no channel enabled, log only): {}", messageText);
+        return new DeliveryResult(DeliveryStatus.LOGGED_ONLY,
+                "No alert channel enabled (EMAIL_ENABLED / WHATSAPP_ENABLED) - written to the application log");
     }
 }

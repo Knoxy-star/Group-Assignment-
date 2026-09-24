@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.ComponentScan;
 import zw.ac.uz.dpdms.alert.config.AlertProperties;
+import zw.ac.uz.dpdms.alert.config.EmailProperties;
 import zw.ac.uz.dpdms.alert.config.WhatsAppProperties;
 
 /**
@@ -14,7 +15,7 @@ import zw.ac.uz.dpdms.alert.config.WhatsAppProperties;
  */
 @SpringBootApplication
 @EnableDiscoveryClient
-@EnableConfigurationProperties({AlertProperties.class, WhatsAppProperties.class})
+@EnableConfigurationProperties({AlertProperties.class, WhatsAppProperties.class, EmailProperties.class})
 @ComponentScan(basePackages = {"zw.ac.uz.dpdms.alert", "zw.ac.uz.dpdms.common"})
 public class AlertServiceApplication {
     public static void main(String[] args) {
