@@ -34,3 +34,12 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+dpdms:
+  alerts:
+    drought:
+      # Brief doesn't name a drought criterion explicitly - alert once
+      # either threshold is reached. Assumed values - change here or via
+      # DROUGHT_DRY_DAYS_THRESHOLD / DROUGHT_CROP_FAILURE_PERCENT_THRESHOLD.
+      dry-days-threshold: ${DROUGHT_DRY_DAYS_THRESHOLD:30}
+      crop-failure-percent-threshold: ${DROUGHT_CROP_FAILURE_PERCENT_THRESHOLD:50.0}

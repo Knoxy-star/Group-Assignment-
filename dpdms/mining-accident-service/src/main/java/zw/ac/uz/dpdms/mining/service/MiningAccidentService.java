@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.HazardScopeGuard;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentEventPublisher;
 import zw.ac.uz.dpdms.common.IncidentStatus;
 import zw.ac.uz.dpdms.common.RequestContext;
 import zw.ac.uz.dpdms.mining.dto.DecisionRequest;
@@ -15,6 +17,7 @@ import zw.ac.uz.dpdms.mining.entity.MiningAuditLog;
 import zw.ac.uz.dpdms.mining.repository.MiningAccidentIncidentRepository;
 import zw.ac.uz.dpdms.mining.repository.MiningAuditLogRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -29,13 +32,16 @@ public class MiningAccidentService {
     private final MiningAccidentIncidentRepository incidentRepository;
     private final MiningAuditLogRepository auditLogRepository;
     private final HazardScopeGuard scopeGuard;
+    private final IncidentEventPublisher eventPublisher;
 
     public MiningAccidentService(MiningAccidentIncidentRepository incidentRepository,
                                   MiningAuditLogRepository auditLogRepository,
-                                  HazardScopeGuard scopeGuard) {
+                                  HazardScopeGuard scopeGuard,
+                                  IncidentEventPublisher eventPublisher) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
+        this.eventPublisher = eventPublisher;
     }
 
     // ---------- CREATE ----------
@@ -178,7 +184,69 @@ public class MiningAccidentService {
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.APPROVED, ctx, "Approved by supervisor");
 
+        // Tell alert-service (via RabbitMQ). Never throws: if RabbitMQ is
+        // down the approval above is still saved and a warning is logged.
+        eventPublisher.publishApproved(new IncidentApprovedEvent(
+                SERVICE_HAZARD,
+                incident.getId(),
+                incident.getWard(),
+                incident.getDistrict(),
+                incident.getProvince(),
+                incident.getSeverity(),
+                incident.getOccurredAt(),
+                alertSummary(incident),
+                meetsAlertCriteria(incident),
+                alertCriteriaReason(incident)));
+
         return IncidentResponse.from(incident);
+    }
+
+    /**
+     * Mining alerting criterion (brief: "a mining accident with
+     * casualties") - anyone trapped, injured or killed.
+     */
+    private boolean meetsAlertCriteria(MiningAccidentIncident incident) {
+        return (incident.getFatalitiesCount() != null && incident.getFatalitiesCount() > 0)
+                || (incident.getTrappedOrInjuredCount() != null && incident.getTrappedOrInjuredCount() > 0);
+    }
+
+    /** Human-readable explanation stored in the alert log either way. */
+    private String alertCriteriaReason(MiningAccidentIncident incident) {
+        int fatalities = incident.getFatalitiesCount() != null ? incident.getFatalitiesCount() : 0;
+        int trapped = incident.getTrappedOrInjuredCount() != null ? incident.getTrappedOrInjuredCount() : 0;
+        if (fatalities > 0 || trapped > 0) {
+            return fatalities + " fatalities and " + trapped + " trapped/injured - has casualties";
+        }
+        return "No fatalities or trapped/injured reported";
+    }
+
+    /**
+     * One-line, hazard-specific summary for the alert message, e.g.
+     * "Test Shaft (ARTISANAL), COLLAPSE, 3 trapped/injured, 0 fatalities,
+     * rescue ongoing".
+     */
+    private String alertSummary(MiningAccidentIncident incident) {
+        List<String> parts = new ArrayList<>();
+        if (incident.getMineName() != null) {
+            String mine = incident.getMineName();
+            if (incident.getMineType() != null) {
+                mine += " (" + incident.getMineType() + ")";
+            }
+            parts.add(mine);
+        }
+        if (incident.getAccidentType() != null) {
+            parts.add(incident.getAccidentType().name());
+        }
+        if (incident.getTrappedOrInjuredCount() != null) {
+            parts.add(incident.getTrappedOrInjuredCount() + " trapped/injured");
+        }
+        if (incident.getFatalitiesCount() != null) {
+            parts.add(incident.getFatalitiesCount() + " fatalities");
+        }
+        if (Boolean.TRUE.equals(incident.getRescueOngoing())) {
+            parts.add("rescue ongoing");
+        }
+        return String.join(", ", parts);
     }
 
     public IncidentResponse reject(RequestContext ctx, Long id, DecisionRequest req) {

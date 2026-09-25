@@ -1,9 +1,12 @@
 package zw.ac.uz.dpdms.drought.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.HazardScopeGuard;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentEventPublisher;
 import zw.ac.uz.dpdms.common.IncidentStatus;
 import zw.ac.uz.dpdms.common.RequestContext;
 import zw.ac.uz.dpdms.drought.dto.DecisionRequest;
@@ -15,6 +18,7 @@ import zw.ac.uz.dpdms.drought.entity.DroughtAuditLog;
 import zw.ac.uz.dpdms.drought.repository.DroughtIncidentRepository;
 import zw.ac.uz.dpdms.drought.repository.DroughtAuditLogRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -29,13 +33,29 @@ public class DroughtService {
     private final DroughtIncidentRepository incidentRepository;
     private final DroughtAuditLogRepository auditLogRepository;
     private final HazardScopeGuard scopeGuard;
+    private final IncidentEventPublisher eventPublisher;
+
+    // Drought alerting criterion. The brief doesn't name one explicitly
+    // (unlike flood/fire/zoonotic/mining), so this mirrors flood's
+    // pattern: alert once consecutive dry days or crop failure reach
+    // these thresholds. Assumed values - change here or via the
+    // DROUGHT_DRY_DAYS_THRESHOLD / DROUGHT_CROP_FAILURE_PERCENT_THRESHOLD
+    // environment variables.
+    private final int dryDaysThreshold;
+    private final double cropFailurePercentThreshold;
 
     public DroughtService(DroughtIncidentRepository incidentRepository,
                                   DroughtAuditLogRepository auditLogRepository,
-                                  HazardScopeGuard scopeGuard) {
+                                  HazardScopeGuard scopeGuard,
+                                  IncidentEventPublisher eventPublisher,
+                                  @Value("${dpdms.alerts.drought.dry-days-threshold:30}") int dryDaysThreshold,
+                                  @Value("${dpdms.alerts.drought.crop-failure-percent-threshold:50.0}") double cropFailurePercentThreshold) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
+        this.eventPublisher = eventPublisher;
+        this.dryDaysThreshold = dryDaysThreshold;
+        this.cropFailurePercentThreshold = cropFailurePercentThreshold;
     }
 
     // ---------- CREATE ----------
@@ -176,7 +196,67 @@ public class DroughtService {
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.APPROVED, ctx, "Approved by supervisor");
 
+        // Tell alert-service (via RabbitMQ). Never throws: if RabbitMQ is
+        // down the approval above is still saved and a warning is logged.
+        eventPublisher.publishApproved(new IncidentApprovedEvent(
+                SERVICE_HAZARD,
+                incident.getId(),
+                incident.getWard(),
+                incident.getDistrict(),
+                incident.getProvince(),
+                incident.getSeverity(),
+                incident.getOccurredAt(),
+                alertSummary(incident),
+                meetsAlertCriteria(incident),
+                alertCriteriaReason(incident)));
+
         return IncidentResponse.from(incident);
+    }
+
+    private boolean meetsAlertCriteria(DroughtIncident incident) {
+        boolean prolongedDryPeriod = incident.getConsecutiveDryDays() != null
+                && incident.getConsecutiveDryDays() >= dryDaysThreshold;
+        boolean severeCropFailure = incident.getCropFailurePercent() != null
+                && incident.getCropFailurePercent() >= cropFailurePercentThreshold;
+        return prolongedDryPeriod || severeCropFailure;
+    }
+
+    /** Human-readable explanation stored in the alert log either way. */
+    private String alertCriteriaReason(DroughtIncident incident) {
+        Integer dryDays = incident.getConsecutiveDryDays();
+        Double cropFailure = incident.getCropFailurePercent();
+        if (dryDays != null && dryDays >= dryDaysThreshold) {
+            return dryDays + " consecutive dry days is at or above the " + dryDaysThreshold + "-day threshold";
+        }
+        if (cropFailure != null && cropFailure >= cropFailurePercentThreshold) {
+            return cropFailure + "% crop failure is at or above the " + cropFailurePercentThreshold + "% threshold";
+        }
+        return "Below the " + dryDaysThreshold + "-day dry spell and " + cropFailurePercentThreshold + "% crop failure thresholds";
+    }
+
+    /**
+     * One-line, hazard-specific summary for the alert message, e.g.
+     * "45.0 mm rainfall deficit, 35 consecutive dry days, 60.0% crop
+     * failure, 500 facing water shortage, 12 livestock deaths".
+     */
+    private String alertSummary(DroughtIncident incident) {
+        List<String> parts = new ArrayList<>();
+        if (incident.getRainfallDeficitMm() != null) {
+            parts.add(incident.getRainfallDeficitMm() + " mm rainfall deficit");
+        }
+        if (incident.getConsecutiveDryDays() != null) {
+            parts.add(incident.getConsecutiveDryDays() + " consecutive dry days");
+        }
+        if (incident.getCropFailurePercent() != null) {
+            parts.add(incident.getCropFailurePercent() + "% crop failure");
+        }
+        if (incident.getPeopleFacingWaterShortage() != null) {
+            parts.add(incident.getPeopleFacingWaterShortage() + " facing water shortage");
+        }
+        if (incident.getLivestockMortalityCount() != null) {
+            parts.add(incident.getLivestockMortalityCount() + " livestock deaths");
+        }
+        return String.join(", ", parts);
     }
 
     public IncidentResponse reject(RequestContext ctx, Long id, DecisionRequest req) {

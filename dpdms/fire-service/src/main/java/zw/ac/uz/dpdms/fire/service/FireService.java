@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.HazardScopeGuard;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentEventPublisher;
 import zw.ac.uz.dpdms.common.IncidentStatus;
 import zw.ac.uz.dpdms.common.RequestContext;
 import zw.ac.uz.dpdms.fire.dto.DecisionRequest;
@@ -15,6 +17,7 @@ import zw.ac.uz.dpdms.fire.entity.FireAuditLog;
 import zw.ac.uz.dpdms.fire.repository.FireIncidentRepository;
 import zw.ac.uz.dpdms.fire.repository.FireAuditLogRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -29,13 +32,16 @@ public class FireService {
     private final FireIncidentRepository incidentRepository;
     private final FireAuditLogRepository auditLogRepository;
     private final HazardScopeGuard scopeGuard;
+    private final IncidentEventPublisher eventPublisher;
 
     public FireService(FireIncidentRepository incidentRepository,
                                   FireAuditLogRepository auditLogRepository,
-                                  HazardScopeGuard scopeGuard) {
+                                  HazardScopeGuard scopeGuard,
+                                  IncidentEventPublisher eventPublisher) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
+        this.eventPublisher = eventPublisher;
     }
 
     // ---------- CREATE ----------
@@ -176,7 +182,59 @@ public class FireService {
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.APPROVED, ctx, "Approved by supervisor");
 
+        // Tell alert-service (via RabbitMQ). Never throws: if RabbitMQ is
+        // down the approval above is still saved and a warning is logged.
+        eventPublisher.publishApproved(new IncidentApprovedEvent(
+                SERVICE_HAZARD,
+                incident.getId(),
+                incident.getWard(),
+                incident.getDistrict(),
+                incident.getProvince(),
+                incident.getSeverity(),
+                incident.getOccurredAt(),
+                alertSummary(incident),
+                meetsAlertCriteria(incident),
+                alertCriteriaReason(incident)));
+
         return IncidentResponse.from(incident);
+    }
+
+    /** Fire alerting criterion (brief: "a fire that is still burning"). */
+    private boolean meetsAlertCriteria(FireIncident incident) {
+        return Boolean.FALSE.equals(incident.getContained());
+    }
+
+    /** Human-readable explanation stored in the alert log either way. */
+    private String alertCriteriaReason(FireIncident incident) {
+        if (incident.getContained() == null) {
+            return "Containment status not recorded";
+        }
+        return incident.getContained() ? "Fire is contained" : "Fire is still burning (not contained)";
+    }
+
+    /**
+     * One-line, hazard-specific summary for the alert message, e.g.
+     * "12.0 ha burned, ACCIDENTAL, 2 injuries/fatalities, 1 structures
+     * destroyed, still burning".
+     */
+    private String alertSummary(FireIncident incident) {
+        List<String> parts = new ArrayList<>();
+        if (incident.getAreaBurnedHectares() != null) {
+            parts.add(incident.getAreaBurnedHectares() + " ha burned");
+        }
+        if (incident.getSuspectedCause() != null) {
+            parts.add(incident.getSuspectedCause().name());
+        }
+        if (incident.getInjuriesFatalitiesCount() != null) {
+            parts.add(incident.getInjuriesFatalitiesCount() + " injuries/fatalities");
+        }
+        if (incident.getStructuresDestroyedCount() != null) {
+            parts.add(incident.getStructuresDestroyedCount() + " structures destroyed");
+        }
+        if (incident.getContained() != null) {
+            parts.add(incident.getContained() ? "contained" : "still burning");
+        }
+        return String.join(", ", parts);
     }
 
     public IncidentResponse reject(RequestContext ctx, Long id, DecisionRequest req) {

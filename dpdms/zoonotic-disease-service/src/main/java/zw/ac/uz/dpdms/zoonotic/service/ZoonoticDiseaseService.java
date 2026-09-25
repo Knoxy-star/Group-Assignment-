@@ -1,9 +1,12 @@
 package zw.ac.uz.dpdms.zoonotic.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import zw.ac.uz.dpdms.common.AuditAction;
 import zw.ac.uz.dpdms.common.Hazard;
 import zw.ac.uz.dpdms.common.HazardScopeGuard;
+import zw.ac.uz.dpdms.common.IncidentApprovedEvent;
+import zw.ac.uz.dpdms.common.IncidentEventPublisher;
 import zw.ac.uz.dpdms.common.IncidentStatus;
 import zw.ac.uz.dpdms.common.RequestContext;
 import zw.ac.uz.dpdms.zoonotic.dto.DecisionRequest;
@@ -11,10 +14,12 @@ import zw.ac.uz.dpdms.zoonotic.dto.IncidentCreateRequest;
 import zw.ac.uz.dpdms.zoonotic.dto.IncidentResponse;
 import zw.ac.uz.dpdms.zoonotic.dto.IncidentUpdateRequest;
 import zw.ac.uz.dpdms.zoonotic.entity.ZoonoticDiseaseIncident;
+import zw.ac.uz.dpdms.zoonotic.entity.ZoonoticDiseaseIncident.OutbreakClassification;
 import zw.ac.uz.dpdms.zoonotic.entity.ZoonoticAuditLog;
 import zw.ac.uz.dpdms.zoonotic.repository.ZoonoticDiseaseIncidentRepository;
 import zw.ac.uz.dpdms.zoonotic.repository.ZoonoticAuditLogRepository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -29,13 +34,24 @@ public class ZoonoticDiseaseService {
     private final ZoonoticDiseaseIncidentRepository incidentRepository;
     private final ZoonoticAuditLogRepository auditLogRepository;
     private final HazardScopeGuard scopeGuard;
+    private final IncidentEventPublisher eventPublisher;
+
+    // Zoonotic alerting criterion (brief: "a zoonotic disease cluster").
+    // OUTBREAK always alerts; a CLUSTER alerts once confirmed animal
+    // cases reach this size. Assumed value - change here or via the
+    // ZOONOTIC_CLUSTER_SIZE environment variable.
+    private final int clusterAlertSize;
 
     public ZoonoticDiseaseService(ZoonoticDiseaseIncidentRepository incidentRepository,
                                   ZoonoticAuditLogRepository auditLogRepository,
-                                  HazardScopeGuard scopeGuard) {
+                                  HazardScopeGuard scopeGuard,
+                                  IncidentEventPublisher eventPublisher,
+                                  @Value("${dpdms.alerts.zoonotic.cluster-size:3}") int clusterAlertSize) {
         this.incidentRepository = incidentRepository;
         this.auditLogRepository = auditLogRepository;
         this.scopeGuard = scopeGuard;
+        this.eventPublisher = eventPublisher;
+        this.clusterAlertSize = clusterAlertSize;
     }
 
     // ---------- CREATE ----------
@@ -176,7 +192,67 @@ public class ZoonoticDiseaseService {
         incident = incidentRepository.save(incident);
         writeAudit(incident.getId(), AuditAction.APPROVED, ctx, "Approved by supervisor");
 
+        // Tell alert-service (via RabbitMQ). Never throws: if RabbitMQ is
+        // down the approval above is still saved and a warning is logged.
+        eventPublisher.publishApproved(new IncidentApprovedEvent(
+                SERVICE_HAZARD,
+                incident.getId(),
+                incident.getWard(),
+                incident.getDistrict(),
+                incident.getProvince(),
+                incident.getSeverity(),
+                incident.getOccurredAt(),
+                alertSummary(incident),
+                meetsAlertCriteria(incident),
+                alertCriteriaReason(incident)));
+
         return IncidentResponse.from(incident);
+    }
+
+    /** Zoonotic alerting criterion (brief: "a zoonotic disease cluster"). */
+    private boolean meetsAlertCriteria(ZoonoticDiseaseIncident incident) {
+        if (incident.getOutbreakClassification() == OutbreakClassification.OUTBREAK) {
+            return true;
+        }
+        return incident.getOutbreakClassification() == OutbreakClassification.CLUSTER
+                && incident.getConfirmedAnimalCases() != null
+                && incident.getConfirmedAnimalCases() >= clusterAlertSize;
+    }
+
+    /** Human-readable explanation stored in the alert log either way. */
+    private String alertCriteriaReason(ZoonoticDiseaseIncident incident) {
+        if (incident.getOutbreakClassification() == OutbreakClassification.OUTBREAK) {
+            return "Classified as an OUTBREAK";
+        }
+        int cases = incident.getConfirmedAnimalCases() != null ? incident.getConfirmedAnimalCases() : 0;
+        return "CLUSTER with " + cases + " confirmed animal cases is "
+                + (cases >= clusterAlertSize ? "at or above" : "below")
+                + " the " + clusterAlertSize + "-case cluster alert size";
+    }
+
+    /**
+     * One-line, hazard-specific summary for the alert message, e.g.
+     * "Anthrax in CATTLE, OUTBREAK, 5 confirmed animal cases, 1 human case".
+     */
+    private String alertSummary(ZoonoticDiseaseIncident incident) {
+        List<String> parts = new ArrayList<>();
+        if (incident.getDiseaseName() != null) {
+            String disease = incident.getDiseaseName();
+            if (incident.getAnimalSpecies() != null) {
+                disease += " in " + incident.getAnimalSpecies();
+            }
+            parts.add(disease);
+        }
+        if (incident.getOutbreakClassification() != null) {
+            parts.add(incident.getOutbreakClassification().name());
+        }
+        if (incident.getConfirmedAnimalCases() != null) {
+            parts.add(incident.getConfirmedAnimalCases() + " confirmed animal cases");
+        }
+        if (incident.getHumanCasesCount() != null && incident.getHumanCasesCount() > 0) {
+            parts.add(incident.getHumanCasesCount() + " human cases");
+        }
+        return String.join(", ", parts);
     }
 
     public IncidentResponse reject(RequestContext ctx, Long id, DecisionRequest req) {
