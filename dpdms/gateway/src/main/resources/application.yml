@@ -45,6 +45,12 @@ spring:
             - Path=/fire-service/**
           filters:
             - StripPrefix=1
+            - id: dashboard-service
+            - uri: lb://dashboard-service
+            - predicates:
+            - Path=/dashboard-service/**
+            - filters:
+            
 
         - id: zoonotic-disease-service
           uri: lb://zoonotic-disease-service
