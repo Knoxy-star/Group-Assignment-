@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>DPDMS Reports</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+        form { display: grid; grid-template-columns: 170px 1fr; gap: 10px 16px; align-items: center; margin-top: 20px; }
+        label { font-weight: 600; font-size: 14px; }
+        input, select { padding: 6px 8px; font-size: 14px; max-width: 320px; }
+        .dates input { width: 150px; }
+        .hint { color: #666; font-size: 12px; }
+        .buttons { margin-top: 24px; display: flex; gap: 10px; flex-wrap: wrap; }
+        button { padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid #999; border-radius: 4px; background: #f4f4f4; }
+        button:disabled { opacity: 0.5; cursor: wait; }
+        #status { margin-top: 20px; font-size: 14px; }
+        .ok { color: #1e7e34; }
+        .warn { color: #8a6d00; }
+        .error { color: #b00020; }
+    </style>
+</head>
+<body>
+<h1>Reports</h1>
+<p>Logged in as <span id="whoami"></span> (<span id="role"></span>)</p>
+<p class="hint" id="scopeNote"></p>
+
+<form id="filters" onsubmit="return false;">
+    <label for="hazard">Hazard</label>
+    <select id="hazard">
+        <option value="">All hazards I can see</option>
+        <option value="FLOOD">Flood</option>
+        <option value="DROUGHT">Drought</option>
+        <option value="FIRE">Fire</option>
+        <option value="ZOONOTIC_DISEASE">Zoonotic disease</option>
+        <option value="MINING_ACCIDENT">Mining accident</option>
+    </select>
+
+    <label for="ward">Ward</label>
+    <input id="ward" placeholder="e.g. Rushinga Ward 1 (blank = any)">
+
+    <label for="district">District</label>
+    <input id="district" placeholder="e.g. Rushinga (blank = any)">
+
+    <label>Date of occurrence</label>
+    <span class="dates">
+        <input type="date" id="from"> to <input type="date" id="to">
+    </span>
+
+    <label for="severity">Severity</label>
+    <select id="severity">
+        <option value="">Any</option>
+        <option value="LOW">Low</option>
+        <option value="MODERATE">Moderate</option>
+        <option value="HIGH">High</option>
+        <option value="CRITICAL">Critical</option>
+    </select>
+
+    <label for="statusFilter">Approval status</label>
+    <select id="statusFilter">
+        <option value="APPROVED">Approved</option>
+        <option value="PENDING">Pending</option>
+        <option value="CORRECTIONS_REQUESTED">Corrections requested</option>
+        <option value="REJECTED">Rejected</option>
+    </select>
+</form>
+
+<div class="buttons">
+    <button type="button" data-format="pdf">Download PDF</button>
+    <button type="button" data-format="docx">Download Word</button>
+    <button type="button" data-format="xlsx">Download Excel</button>
+    <button type="button" data-format="csv">Download CSV</button>
+</div>
+
+<div id="status"></div>
+
+<script src="/report-service/js/api.js"></script>
+<script>
+    const ALLOWED = ['PROVINCIAL_SUPERVISOR', 'PROVINCIAL_ADMIN', 'NATIONAL_VIEWER'];
+
+    function setStatus(text, cls) {
+        const el = document.getElementById('status');
+        el.textContent = text;
+        el.className = cls || '';
+    }
+
+    function buildQuery(format) {
+        const params = new URLSearchParams();
+        params.set('format', format);
+        ['hazard', 'ward', 'district', 'from', 'to', 'severity'].forEach(function (id) {
+            const v = document.getElementById(id).value.trim();
+            if (v) {
+                params.set(id, v);
+            }
+        });
+        const status = document.getElementById('statusFilter');
+        if (!status.disabled && status.value) {
+            params.set('status', status.value);
+        }
+        return params.toString();
+    }
+
+    function filenameFrom(res, format) {
+        const cd = res.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^";]+)"?/);
+        return m ? m[1] : ('dpdms-report.' + format);
+    }
+
+    async function download(format, button) {
+        document.querySelectorAll('button').forEach(b => b.disabled = true);
+        setStatus('Generating ' + format.toUpperCase() + ' report...');
+        try {
+            const res = await authFetch('/report-service/api/reports?' + buildQuery(format));
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                setStatus(body.error || ('Report failed (HTTP ' + res.status + ')'), 'error');
+                return;
+            }
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filenameFrom(res, format);
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+            const rows = res.headers.get('X-Report-Rows') || '0';
+            const warnings = res.headers.get('X-Report-Warnings');
+            if (warnings) {
+                setStatus('Downloaded ' + a.download + ' (' + rows + ' incidents). Note: ' + warnings, 'warn');
+            } else {
+                setStatus('Downloaded ' + a.download + ' (' + rows + ' incidents).', 'ok');
+            }
+        } catch (e) {
+            setStatus('Report failed: ' + e.message, 'error');
+        } finally {
+            document.querySelectorAll('button').forEach(b => b.disabled = false);
+        }
+    }
+
+    if (requireAuth(ALLOWED)) {
+        const role = getRole();
+        const hazard = localStorage.getItem('dpdms_hazard');
+        document.getElementById('whoami').textContent = getUsername();
+        document.getElementById('role').textContent = role;
+
+        const statusSelect = document.getElementById('statusFilter');
+        if (role === 'NATIONAL_VIEWER') {
+            // Server enforces this too; the page just doesn't offer it.
+            statusSelect.disabled = true;
+            document.getElementById('scopeNote').textContent =
+                'National view: all hazards, approved incidents only.';
+        } else if (role === 'PROVINCIAL_SUPERVISOR') {
+            if (hazard) {
+                document.getElementById('hazard').value = hazard;
+            }
+            document.getElementById('scopeNote').textContent =
+                'Supervisor view: your own hazard only (' + hazard + '). Other hazards are refused by their services.';
+        } else {
+            document.getElementById('scopeNote').textContent =
+                'Provincial administrator: all hazards, any approval status.';
+        }
+
+        document.querySelectorAll('button[data-format]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                download(b.getAttribute('data-format'), b);
+            });
+        });
+    }
+</script>
+</body>
+</html>

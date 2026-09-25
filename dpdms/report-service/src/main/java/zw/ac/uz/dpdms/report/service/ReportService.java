@@ -1,0 +1,267 @@
+package zw.ac.uz.dpdms.report.service;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import zw.ac.uz.dpdms.common.AccessDeniedException;
+import zw.ac.uz.dpdms.common.Hazard;
+import zw.ac.uz.dpdms.common.IncidentStatus;
+import zw.ac.uz.dpdms.common.RequestContext;
+import zw.ac.uz.dpdms.report.client.HazardDataClient;
+import zw.ac.uz.dpdms.report.client.HazardServiceException;
+import zw.ac.uz.dpdms.report.entity.ReportLog;
+import zw.ac.uz.dpdms.report.model.Column;
+import zw.ac.uz.dpdms.report.model.HazardSection;
+import zw.ac.uz.dpdms.report.model.ReportData;
+import zw.ac.uz.dpdms.report.model.ReportFilter;
+import zw.ac.uz.dpdms.report.repository.ReportLogRepository;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Builds a report: decides which hazards and statuses the caller may
+ * report on, fetches each hazard's incidents from its own service, applies
+ * the filters, and describes the columns. Output formats are handled
+ * separately by the ReportWriter classes.
+ *
+ * Access rules (the brief: unapproved records "must not be included in
+ * generated reports"; only the recorder, the hazard's supervisor and the
+ * provincial admin may see a pending record):
+ *  - WARD_RECORDER          cannot generate reports
+ *  - NATIONAL_VIEWER        all hazards, APPROVED only
+ *  - PROVINCIAL_SUPERVISOR  own hazard only; APPROVED by default, may
+ *                           choose another status for their own hazard
+ *  - PROVINCIAL_ADMIN       all hazards; APPROVED by default, may choose
+ *                           another status
+ * On top of this, every hazard service applies its own rules to the
+ * forwarded request (a flood supervisor asking fire-service is refused
+ * by fire-service itself).
+ */
+@Service
+public class ReportService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReportService.class);
+
+    /** Shared incident metadata, in report order. */
+    private static final List<Column> METADATA = List.of(
+            new Column("id", "ID"),
+            new Column("occurredAt", "Occurred"),
+            new Column("ward", "Ward"),
+            new Column("district", "District"),
+            new Column("province", "Province"),
+            new Column("severity", "Severity"),
+            new Column("status", "Status"),
+            new Column("latitude", "Latitude"),
+            new Column("longitude", "Longitude"),
+            new Column("reporterId", "Reporter ID"));
+
+    /** Metadata kept in the compact (PDF/Word) layout; GPS is combined. */
+    private static final List<Column> COMPACT_METADATA = List.of(
+            new Column("id", "ID"),
+            new Column("occurredAt", "Occurred"),
+            new Column("ward", "Ward"),
+            new Column("district", "District"),
+            new Column("severity", "Severity"),
+            new Column("status", "Status"),
+            new Column(Column.GPS, "GPS"));
+
+    /** Fields that are never indicator columns. */
+    private static final Set<String> NOT_INDICATORS = Set.of(
+            "id", "occurredAt", "ward", "district", "province", "severity", "status",
+            "latitude", "longitude", "reporterId", "reviewNotes", "createdAt", "updatedAt");
+
+    private final HazardDataClient client;
+    private final ReportLogRepository logRepository;
+
+    public ReportService(HazardDataClient client, ReportLogRepository logRepository) {
+        this.client = client;
+        this.logRepository = logRepository;
+    }
+
+    public ReportData build(RequestContext ctx, ReportFilter filter) {
+        IncidentStatus status = resolveStatus(ctx, filter);
+        List<Hazard> hazards = resolveHazards(ctx, filter);
+
+        List<HazardSection> sections = new ArrayList<>();
+        for (Hazard hazard : hazards) {
+            sections.add(section(ctx, hazard, status, filter, hazards.size() == 1));
+        }
+
+        return new ReportData(
+                "Rushinga DPDMS Incident Report",
+                LocalDateTime.now(),
+                ctx.role().name().replace('_', ' ') + " (user #" + ctx.userId() + ")",
+                describe(filter, status, hazards),
+                sections);
+    }
+
+    public void record(RequestContext ctx, String format, ReportData data) {
+        ReportLog entry = new ReportLog();
+        entry.setUserId(ctx.userId());
+        entry.setRole(ctx.role().name());
+        entry.setFormat(format);
+        entry.setFilters(truncate(String.join("; ", data.filterLines()), 1000));
+        entry.setRowCount(data.totalRows());
+        List<String> warnings = data.warnings();
+        entry.setWarnings(warnings.isEmpty() ? null : truncate(String.join("; ", warnings), 1000));
+        logRepository.save(entry);
+        log.info("{} report generated by {} #{}: {} incidents{}", format, ctx.role(), ctx.userId(),
+                data.totalRows(), warnings.isEmpty() ? "" : " (warnings: " + warnings + ")");
+    }
+
+    public List<ReportLog> history(RequestContext ctx) {
+        if (!ctx.isProvincialAdmin()) {
+            throw new AccessDeniedException("Only the provincial administrator can view the report log");
+        }
+        return logRepository.findTop50ByOrderByGeneratedAtDesc();
+    }
+
+    // ---- access rules -------------------------------------------------
+
+    private IncidentStatus resolveStatus(RequestContext ctx, ReportFilter filter) {
+        if (ctx == null || ctx.role() == null) {
+            throw new AccessDeniedException("Not signed in");
+        }
+        if (ctx.isRecorder()) {
+            throw new AccessDeniedException("Ward recorders cannot generate reports");
+        }
+        IncidentStatus status = filter.status() == null ? IncidentStatus.APPROVED : filter.status();
+        if (status != IncidentStatus.APPROVED && !(ctx.isSupervisor() || ctx.isProvincialAdmin())) {
+            throw new AccessDeniedException(
+                    "Your role can only report on APPROVED incidents - unapproved records are not included in reports");
+        }
+        return status;
+    }
+
+    private List<Hazard> resolveHazards(RequestContext ctx, ReportFilter filter) {
+        if (filter.hazard() != null) {
+            // Deliberately NOT pre-checked here for supervisors: the hazard
+            // service itself refuses a supervisor of another hazard.
+            return List.of(filter.hazard());
+        }
+        if (ctx.isSupervisor()) {
+            if (ctx.hazard() == null) {
+                throw new AccessDeniedException("Supervisor account has no hazard assigned");
+            }
+            return List.of(ctx.hazard());
+        }
+        return List.of(Hazard.values());
+    }
+
+    // ---- data -----------------------------------------------------------
+
+    private HazardSection section(RequestContext ctx, Hazard hazard, IncidentStatus status,
+                                  ReportFilter filter, boolean onlyHazard) {
+        String service = HazardDataClient.serviceName(hazard);
+        List<Map<String, Object>> rows;
+        try {
+            rows = client.fetchIncidents(hazard, ctx, status);
+        } catch (HazardServiceException e) {
+            if (e.isForbidden() && onlyHazard) {
+                // The hazard service denied this user: pass its answer on as a 403.
+                throw new AccessDeniedException(e.getMessage());
+            }
+            log.warn("Report: {}", e.getMessage());
+            return unavailable(hazard, service, e.getMessage());
+        } catch (Exception e) {
+            // Service down / not registered in Eureka / timed out:
+            // degrade gracefully - the rest of the report is still produced.
+            log.warn("Report: could not reach {}: {}", service, e.getMessage());
+            return unavailable(hazard, service, service + " could not be reached");
+        }
+
+        List<Map<String, Object>> matching = rows.stream()
+                // Defence in depth: never include a status other than the one requested.
+                .filter(r -> status.name().equals(String.valueOf(r.get("status"))))
+                .filter(r -> matchesText(r.get("ward"), filter.ward()))
+                .filter(r -> matchesText(r.get("district"), filter.district()))
+                .filter(r -> filter.severity() == null
+                        || filter.severity().name().equals(String.valueOf(r.get("severity"))))
+                .filter(r -> inDateRange(r.get("occurredAt"), filter.from(), filter.to()))
+                .sorted(Comparator.comparing((Map<String, Object> r) -> String.valueOf(r.get("occurredAt")))
+                        .reversed())
+                .toList();
+
+        List<Column> indicators = indicatorColumns(rows);
+        List<Column> full = new ArrayList<>(METADATA);
+        full.addAll(indicators);
+        List<Column> compact = new ArrayList<>(COMPACT_METADATA);
+        compact.addAll(indicators);
+        return new HazardSection(hazard, service, full, compact, matching, null);
+    }
+
+    private static HazardSection unavailable(Hazard hazard, String service, String reason) {
+        return new HazardSection(hazard, service, METADATA, COMPACT_METADATA, List.of(), reason);
+    }
+
+    /** Hazard-specific fields, in the order the hazard service returns them. */
+    private static List<Column> indicatorColumns(List<Map<String, Object>> rows) {
+        Map<String, Column> columns = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            for (String key : row.keySet()) {
+                if (!NOT_INDICATORS.contains(key)) {
+                    columns.putIfAbsent(key, new Column(key, label(key)));
+                }
+            }
+        }
+        return new ArrayList<>(columns.values());
+    }
+
+    /** "peakWaterLevelMetres" -> "Peak Water Level Metres" */
+    static String label(String key) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < key.length(); i++) {
+            char c = key.charAt(i);
+            if (i == 0) {
+                sb.append(Character.toUpperCase(c));
+            } else if (Character.isUpperCase(c) && !Character.isUpperCase(key.charAt(i - 1))) {
+                sb.append(' ').append(c);
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean matchesText(Object value, String wanted) {
+        return wanted == null || (value != null && String.valueOf(value).trim().equalsIgnoreCase(wanted));
+    }
+
+    private static boolean inDateRange(Object occurredAt, LocalDate from, LocalDate to) {
+        if (from == null && to == null) {
+            return true;
+        }
+        if (occurredAt == null) {
+            return false;
+        }
+        try {
+            LocalDate date = LocalDateTime.parse(String.valueOf(occurredAt)).toLocalDate();
+            return (from == null || !date.isBefore(from)) && (to == null || !date.isAfter(to));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static List<String> describe(ReportFilter f, IncidentStatus status, List<Hazard> hazards) {
+        List<String> lines = new ArrayList<>();
+        lines.add("Hazard: " + (f.hazard() != null ? HazardSection.displayName(f.hazard())
+                : hazards.size() == 1 ? HazardSection.displayName(hazards.get(0)) : "All hazards"));
+        lines.add("Approval status: " + status.name().replace('_', ' '));
+        lines.add("Ward: " + (f.ward() != null ? f.ward() : "Any"));
+        lines.add("District: " + (f.district() != null ? f.district() : "Any"));
+        lines.add("Severity: " + (f.severity() != null ? f.severity().name() : "Any"));
+        lines.add("Date range: " + (f.from() != null ? f.from() : "any") + " to " + (f.to() != null ? f.to() : "any"));
+        return lines;
+    }
+
+    private static String truncate(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+}

@@ -43,7 +43,7 @@
         <module>fire-service</module>
         <module>zoonotic-disease-service</module>
         <!-- <module>mining-accident-service</module> -->
-        <!-- <module>report-service</module> -->
+        <module>report-service</module>
         <module>alert-service</module>
         <!-- <module>dashboard-service</module> -->
     </modules>
