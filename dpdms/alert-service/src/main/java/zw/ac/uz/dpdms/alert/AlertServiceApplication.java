@@ -22,3 +22,4 @@ public class AlertServiceApplication {
         SpringApplication.run(AlertServiceApplication.class, args);
     }
 }
+
