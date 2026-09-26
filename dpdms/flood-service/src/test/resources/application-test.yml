@@ -1,0 +1,21 @@
+# Used only by the controller integration tests (@ActiveProfiles("test")).
+# The real service still talks to MySQL - this never touches it.
+spring:
+  datasource:
+    url: jdbc:h2:mem:flooddb;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false

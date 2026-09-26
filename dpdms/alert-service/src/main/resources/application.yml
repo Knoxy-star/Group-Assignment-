@@ -64,6 +64,10 @@ management:
     mail:
       enabled: false
 
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
 dpdms:
   alerts:
     # Hazard services publish to this exchange with routing key
