@@ -21,13 +21,29 @@ alert-service, dashboard-service) is built collaboratively.
 - Java 17, Spring Boot 3.3.4, Spring Cloud 2023.0.3
 - MySQL 8 (one schema per service)
 - RabbitMQ (async alert dispatch)
-- Thymeleaf (server-rendered front end)
+- React 18 + Vite (single-page front end, `frontend/`)
 - Eureka (service discovery) + Spring Cloud Gateway (single entry point)
 - Maven, single repo, multi-module
 
-We chose Thymeleaf over a separate SPA framework to avoid adding a second
-build pipeline and CORS configuration on top of nine backend services
-within a 9-day project timeline.
+We started with Thymeleaf (see the note below on why) and had a working
+page set for every service, but switched to React partway through so the
+whole system would sit behind one consistent, more polished front end
+instead of nine separate server-rendered page sets - the brief asks for
+one front-end technology used consistently, and one SPA calling into all
+nine REST APIs makes that a lot more convincing than nine copies of the
+same three pages. All five hazards' submit/my-submissions/queue pages
+are the same generic components, driven by a small per-hazard config
+(`frontend/src/hazards/config.js`) - adding a hazard means adding one
+config entry, not building a new page set. We kept it CORS-free the same
+way the Thymeleaf pages were: the app never calls a service directly,
+Vite's dev server proxies every `/<service-name>/**` path straight to
+the gateway, so the browser only ever talks to one origin.
+
+(Original reasoning for Thymeleaf, kept for context: it avoided a second
+build pipeline and CORS setup on top of nine backend services within a
+9-day timeline. React ended up being worth the extra setup once we had
+more of the backend working and wanted the dashboard/map/reports to look
+like a real product.)
 
 ## Project layout
 
@@ -36,6 +52,7 @@ dpdms/
   pom.xml                 <- parent, lists all modules
   discovery-service/      <- Eureka registry (port 8761)
   gateway/                <- API gateway, single entry point (port 8080)
+  frontend/                <- React + Vite SPA (port 5173 in dev)
   docker-compose.yml       <- MySQL + RabbitMQ infra
   mysql-init/              <- creates one schema per service on first boot
   (more modules land here as they're built)
@@ -74,6 +91,30 @@ is working end to end and the next services can be added safely.
 
 Always start in this order: `discovery-service` -> `gateway` -> everything
 else (order among the rest doesn't matter, Eureka handles discovery).
+
+## Frontend (React + Vite)
+
+Everyone's page set (Thymeleaf templates, static JS, the little
+per-service `WebController`) got removed once React was in - the SPA in
+`frontend/` is the only UI now, for every service.
+
+```
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. The dev server proxies every
+`/<service-name>/**` request straight to the gateway at
+`http://localhost:8080` (see `vite.config.js`), so the backend must
+already be running (discovery-service, gateway, and whichever hazard
+services you want to exercise) - the frontend itself has no backend
+logic of its own. Log in with any seeded account from the table below;
+routing and the nav bar adapt automatically to the logged-in role.
+
+`npm run build` produces a static `dist/` bundle for anyone who wants to
+deploy the frontend separately (e.g. behind nginx or a static host);
+that step isn't required for local development.
 
 ## auth-service (Day 2)
 
@@ -145,23 +186,21 @@ Runs on port 8082. This is the pattern the other four hazard services
 copy. It has:
 - REST API (`/mining-accident-service/api/incidents/**`) with full
   CRUD + approval workflow (approve / reject / request-corrections)
-- Web pages (`/mining-accident-service/web/submit`,
-  `/web/my-submissions`, `/web/queue`) - plain Thymeleaf pages whose JS
-  calls the REST API with a token from localStorage (set by the login
-  page)
 - RBAC/scoping enforced in the service layer via `HazardScopeGuard`
   (from the shared `common` module) - never trust the gateway alone
 - Audit log recording every state transition
 
+Its UI lives in the shared React frontend (`frontend/`), not in this
+service - see "Frontend (React + Vite)" above.
+
 **Try it end to end:**
-1. Open `http://localhost:8080/auth-service/login.html`, log in as
-   `mining.recorder` / `Password123!`
-2. Go to `http://localhost:8080/mining-accident-service/web/submit`,
-   submit an incident
-3. Log out (clear localStorage / open an incognito window), log in as
-   `mining.supervisor` / `Password123!`
-4. Go to `http://localhost:8080/mining-accident-service/web/queue`,
-   approve/reject/request-corrections on it
+1. Open `http://localhost:5173`, log in as `mining.recorder` /
+   `Password123!` - it drops you straight on the mining-accident submit
+   form (a recorder only ever sees their own hazard)
+2. Submit an incident
+3. Log out, log in as `mining.supervisor` / `Password123!` - this time
+   you land on the mining-accident approval queue
+4. Approve it, or try reject / request-corrections
 
 **REST API (for Postman/testing):**
 
@@ -216,8 +255,10 @@ scoping rules from scratch.
    touch the `HazardScopeGuard` calls themselves, they're already
    correct.
 6. Update your DTOs' hazard-specific fields to match your entity.
-7. Update the Thymeleaf templates' hazard-specific form fields and
-   table columns to match.
+7. Add your hazard to `frontend/src/hazards/config.js` (one entry:
+   slug, label, hazardEnum, servicePath, and your 5 fields with their
+   types/options) - the submit form, tables and queue page pick it up
+   automatically, nothing else in the frontend needs to change.
 8. In `pom.xml` (root): uncomment your service's module line.
 9. In gateway's `application.yml`: your route already exists (all 5
    hazard routes were pre-wired on Day 1) - nothing to change there.
