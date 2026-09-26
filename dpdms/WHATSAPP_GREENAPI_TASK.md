@@ -20,12 +20,47 @@ by scanning a QR code, no Meta approval needed. The brief allows "the WhatsApp
 Business Cloud API **or a comparable gateway**", so Green API is a legitimate
 swap-in, not a shortcut around the requirement.
 
-**First step: `git pull` on `main`.** The repo was recently migrated from
-Thymeleaf to a React + Vite frontend (`frontend/`), and every service's old
-web pages were deleted. None of that touched `alert-service`'s actual
-notification logic (the `notify/` package below) — only its web layer, which
-no longer exists. Make sure you're working from current `main`, not an older
-Thymeleaf-era checkout, before starting.
+The repo was recently migrated from Thymeleaf to a React + Vite frontend
+(`frontend/`), and every service's old web pages were deleted. None of that
+touched `alert-service`'s actual notification logic (the `notify/` package
+below) — only its web layer, which no longer exists. Make sure you're
+working from current `main`, not an older Thymeleaf-era checkout, before
+starting.
+
+## Before you start: don't lose your existing Green API work
+
+**Do not just `git pull` or delete/re-clone the project.** If you have
+uncommitted local changes (your working Green API code, possibly sitting on
+top of the old Thymeleaf `alert-service` pages), pulling `main` directly can
+either refuse to apply (conflicts with the incoming file deletions) or, if
+you force it, silently wipe out your WhatsApp work. Do this instead, in
+order, from inside `dpdms/`:
+
+```
+git status
+```
+See what's actually changed on your machine first.
+
+```
+git checkout -b my-whatsapp-work
+git add -A
+git commit -m "wip: green api whatsapp"
+```
+This safely snapshots your current work on its own branch — nothing on it
+can be lost no matter what happens to `main` next.
+
+```
+git checkout main
+git pull
+```
+Now `main` catches up cleanly: the old Thymeleaf files are gone,
+`frontend/` is present, and your WhatsApp work is safely parked on
+`my-whatsapp-work`, untouched.
+
+Only after that: come back to `my-whatsapp-work` (or just look at the diff
+via `git diff main my-whatsapp-work`) to pull out the actual Green API
+request logic, and follow the steps below to drop it into the current
+`alert-service` structure.
 
 ## How alert-service dispatches alerts (read these files first)
 
