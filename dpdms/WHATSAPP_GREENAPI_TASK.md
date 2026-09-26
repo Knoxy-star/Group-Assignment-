@@ -177,9 +177,24 @@ request logic, and follow the steps below to drop it into the current
 7. **Compile check:** `mvn -q -DskipTests compile` from the `dpdms/` root
    should still build the whole reactor cleanly.
 
-8. **Push to a branch**, not directly to `main` — e.g.
-   `git checkout -b whatsapp-greenapi`, commit, `git push -u origin
-   whatsapp-greenapi` — so it can be reviewed before merging.
+8. **Merge back into `main` and push directly.** This team doesn't use
+   feature-branch pull requests — everyone commits straight to `main` —
+   so the `my-whatsapp-work` branch from step 2 above was only ever a
+   local safety net, not something that gets pushed anywhere on its own:
+   ```
+   git checkout main
+   git pull
+   git merge my-whatsapp-work
+   mvn -q -DskipTests compile
+   git add -A
+   git commit -m "Add Green API WhatsApp notifier"
+   git push
+   ```
+   If `git merge` reports conflicts, resolve them (`git status` shows
+   which files), `git add` the resolved files, then `git commit` to
+   finish the merge before pushing. Once pushed, everyone else
+   (including whoever's machine ran the earlier email setup) needs to
+   `git pull` before their next session to get this.
 
 ## Do not
 
