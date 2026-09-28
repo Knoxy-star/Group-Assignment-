@@ -68,8 +68,7 @@ public class GreenApiWhatsAppNotifier implements AlertNotifier {
     @Override
     public DeliveryResult send(String to, String subject, String messageText) {
         // Green API wants the number with no + and "@c.us" on the end
-        String chatId = to.replace("+", "").replace(" ", "") + "@c.us";
-        try {
+        String chatId = to.replace("+", "").replace(" ", "") + "@c.us";        try {
             restClient.post()
                     .uri(apiUrl + "/waInstance{id}/sendMessage/{token}", idInstance, apiToken)
                     .contentType(MediaType.APPLICATION_JSON)
