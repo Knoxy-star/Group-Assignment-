@@ -1,15 +1,5 @@
 version: "3.8"
 
-# This Compose file runs the INFRASTRUCTURE only: MySQL and RabbitMQ.
-# During development, run the 9 Spring Boot services yourself via
-# `mvn spring-boot:run` in each module (or your IDE) - that gives much
-# faster restart cycles than rebuilding Docker images every change.
-#
-# Before the final submission/demo, we can add each service as a
-# container here too (Dockerfiles are trivial to add once the code is
-# stable), so the whole system starts with one `docker-compose up`.
-# Doing that now, before any service code exists, would just slow down
-# everyone's inner dev loop for no benefit yet.
 
 services:
   mysql:

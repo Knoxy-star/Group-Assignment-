@@ -1,113 +1,54 @@
 # DPDMS - Rushinga Provincial Disaster Monitoring and Management System
 
-University of Zimbabwe, HCS201/HCC201/HAI201 (OOP), group assignment.
-Due: 29 September 2026.
-
-## Team
-
-| Member | Owns |
-|---|---|
-| Marvelous | flood-service |
-| Margret | drought-service |
-| Portia | fire-service |
-| Danai | zoonotic-disease-service |
-| Knowledge | mining-accident-service |
-
-Shared infrastructure (discovery-service, gateway, auth-service, report-service,
-alert-service, dashboard-service) is built collaboratively.
+A microservice system for recording, approving and alerting on disaster
+incidents (flood, drought, fire, zoonotic disease, mining accident)
+across Rushinga's wards and provinces.
 
 ## Stack
 
 - Java 17, Spring Boot 3.3.4, Spring Cloud 2023.0.3
 - MySQL 8 (one schema per service)
 - RabbitMQ (async alert dispatch)
-- React + Vite frontend (`frontend/`) - talks to every service through
-  the gateway at relative paths like `/flood-service/api/incidents`, so
-  there's zero CORS configuration in the backend
+- React + Vite frontend (`frontend/`)
 - Eureka (service discovery) + Spring Cloud Gateway (single entry point)
-- Maven, single repo, multi-module
 
-The project originally used server-rendered Thymeleaf pages; those were
-replaced with the React + Vite SPA in `frontend/` (see commit history).
-If you find any doc or comment still describing Thymeleaf pages, it's
-stale - the frontend is now the only UI.
+## Starting the system
 
-## Project layout
+Prerequisites: Java 17, Maven, Node.js, Docker Desktop.
 
-```
-dpdms/
-  pom.xml                 <- parent, lists all modules
-  discovery-service/      <- Eureka registry (port 8761)
-  gateway/                <- API gateway, single entry point (port 8080)
-  frontend/               <- React + Vite SPA (dev server port 5173)
-  docker-compose.yml       <- MySQL + RabbitMQ infra
-  mysql-init/              <- creates one schema per service on first boot
-  notification-service/   <- unfinished/unused scaffold (Twilio), not
-                              wired into the gateway or started by anyone;
-                              ignore unless you're picking it up
-  (more modules land here as they're built)
-```
-
-## Day 1 setup - do this once
-
-1. Install Java 17, Maven, and Docker Desktop if you don't have them.
-2. Clone the repo.
-3. Start infrastructure:
+1. Start infrastructure:
    ```
    docker-compose up -d
    ```
-   This starts MySQL (port 3306, creates all 9 schemas automatically)
-   and RabbitMQ (port 5672, management UI at http://localhost:15672,
-   login guest/guest).
-4. Start the discovery service:
+   Starts MySQL (port 3306, creates all 9 schemas automatically via
+   `mysql-init/`) and RabbitMQ (port 5672, management UI at
+   http://localhost:15672, login guest/guest).
+2. Start `discovery-service` (Eureka registry), then `gateway` - in
+   that order, each in its own terminal:
    ```
-   cd discovery-service
-   mvn spring-boot:run
+   cd discovery-service && mvn spring-boot:run
    ```
-   Confirm it's up: http://localhost:8761 should show the Eureka
-   dashboard (no services registered yet - that's expected).
-5. In a new terminal, start the gateway:
    ```
-   cd gateway
-   mvn spring-boot:run
+   cd gateway && mvn spring-boot:run
    ```
-   After ~10-20 seconds it should register itself with Eureka - refresh
-   http://localhost:8761 and you should see GATEWAY listed as UP.
+   Confirm both are up at http://localhost:8761 (gateway should show as
+   UP after ~10-20 seconds).
+3. Start the remaining services (order between them doesn't matter -
+   Eureka handles discovery): `auth-service`, `mining-accident-service`,
+   `flood-service`, `drought-service`, `fire-service`,
+   `zoonotic-disease-service`, `dashboard-service`, `report-service`,
+   `alert-service`. Same pattern: `cd <service> && mvn spring-boot:run`.
+4. Start the frontend:
+   ```
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Opens at http://localhost:5173. Vite proxies every `/xxx-service/**`
+   request through to the gateway, so steps 1-3 must be running first.
 
-If both of those are running and visible in Eureka, Day 1 infrastructure
-is working end to end and the next services can be added safely.
-
-## Running the frontend
-
-```
-cd frontend
-npm install
-npm run dev
-```
-Opens at http://localhost:5173. Vite proxies every `/xxx-service/**`
-request straight through to the gateway (port 8080), so the gateway and
-all backing services need to be up first. `npm run build` produces a
-production bundle in `frontend/dist/` (gitignored, build output only).
-
-## Running order (once more services exist)
-
-Always start in this order: `discovery-service` -> `gateway` -> everything
-else (order among the rest doesn't matter, Eureka handles discovery).
-
-## auth-service (Day 2)
-
-Issues JWTs, stores users with their role/hazard/ward scoping. Runs on
-port 8081, reachable through the gateway at `/auth-service/api/auth/**`.
-
-**Endpoints:**
-- `POST /auth-service/api/auth/register` - create a user (username,
-  password, fullName, role, hazard, ward, province - hazard/ward
-  requirements depend on role, enforced server-side)
-- `POST /auth-service/api/auth/login` - returns a JWT plus the user's
-  role/hazard/ward
-
-**Test accounts (seeded automatically on first startup, password for
-all of them is `Password123!`):**
+**Logging in:** test accounts are seeded automatically the first time
+`auth-service` starts. Password for all of them is `Password123!`:
 
 | Username | Role | Hazard | Ward |
 |---|---|---|---|
@@ -124,181 +65,112 @@ all of them is `Password123!`):**
 | national.viewer | NATIONAL_VIEWER | - | - |
 | provincial.admin | PROVINCIAL_ADMIN | - | - |
 
-Use these to test any hazard service's RBAC/scoping logic without
-registering new users each time.
+**Environment variables:** every service falls back to a safe dev-only
+default if an env var isn't set, so the steps above work with zero
+configuration. See `.env.example` at the repo root for what each one
+does (email/WhatsApp alert credentials, JWT secret). The one hard
+constraint: `JWT_SECRET` must be set identically on `auth-service` and
+`gateway` if you override it, or tokens issued by `auth-service` will
+be rejected at the gateway.
 
-## Database
+### Database
 
-MySQL runs as the `mysql` container defined in `docker-compose.yml`.
-Its data is **not** a file inside this repo - it lives in a Docker-
-managed named volume (`mysql_data`), which Docker stores under its own
-data directory (inside the Docker Desktop VM on Windows/Mac). This is
-the standard, portable way to persist a containerized database: every
-teammate gets the same behavior regardless of where they cloned the
-repo, and nothing under `dpdms/` depends on an absolute path on anyone's
-machine.
+MySQL's data lives in `mysql-data/` at the project root (bind-mounted
+by `docker-compose.yml`) - it's created fresh the first time you run
+`docker-compose up -d` and persists across restarts. To start over:
+`docker-compose down -v`.
 
-- Starts fresh on a new machine the first time `docker-compose up -d`
-  runs: `mysql-init/01-create-databases.sql` creates all 9 schemas and
-  the shared `dpdms` app user automatically.
-- To wipe the database and start over: `docker-compose down -v` (removes
-  the `mysql_data` volume too).
-- Every service connects to `jdbc:mysql://localhost:3306/<name>_db`
-  (see each service's `src/main/resources/application.yml`) - no
-  hardcoded host paths anywhere in the config.
-
-### Importing the included database dump
-
-`dpdms-dump.sql` (repo root) is a `mysqldump` snapshot of all 9 schemas,
-taken after starting every service once so tables exist, with the 12
-seeded test accounts already in it (passwords are bcrypt hashes, not
-plaintext - safe to commit). It's a convenience, not a requirement: the
-same tables and accounts get created automatically the first time you
-start the services anyway (see "Day 1 setup" and auth-service's
-`DataSeeder`). Use the dump if you want the data in place *before*
-starting any service, e.g. to inspect it directly in a MySQL client.
-
-1. Start just the MySQL container (skip this if it's already running):
-   ```
-   docker-compose up -d mysql
-   ```
-2. Import - from a bash shell (Git Bash, WSL, macOS, Linux):
-   ```
-   docker exec -i dpdms-mysql mysql -u root -proot_pass < dpdms-dump.sql
-   ```
-   From PowerShell (`<` redirection doesn't work the same way):
-   ```
-   Get-Content dpdms-dump.sql | docker exec -i dpdms-mysql mysql -u root -proot_pass
-   ```
-3. Verify: `docker exec dpdms-mysql mysql -u root -proot_pass -e "SELECT username, role FROM auth_db.users;"`
-   should list all 12 test accounts.
-
-The dump is idempotent-ish but not a merge: re-importing re-creates the
-same 9 databases and re-inserts the same seed rows. If you've since
-submitted real incidents through the app and don't want to lose them,
-don't re-import over a database you care about - take a fresh dump
-instead (see below).
-
-**Re-generating the dump** (e.g. before a demo, to capture more test
-data): with every service running at least once against the database,
+`dpdms-dump.sql` (repo root) is an optional pre-populated snapshot of
+all 9 schemas, including the 12 seeded test accounts. To load it instead
+of letting the services create everything themselves:
 ```
-docker exec dpdms-mysql mysqldump -u root -proot_pass \
-  --databases auth_db flood_db drought_db fire_db zoonotic_db mining_db report_db alert_db dashboard_db \
-  --routines --triggers --single-transaction --comments \
-  > dpdms-dump.sql
+docker-compose up -d mysql
+docker exec -i dpdms-mysql mysql -u root -proot_pass < dpdms-dump.sql
 ```
+(PowerShell: `Get-Content dpdms-dump.sql | docker exec -i dpdms-mysql mysql -u root -proot_pass`)
 
-## Environment variables and secrets
+## Hazard-level scoping
 
-See `.env.example` at the repo root. Every service falls back to a
-documented dev-only default if an env var isn't set, so nobody needs
-to configure anything just to run the system locally. Before final
-submission, set real values (especially `JWT_SECRET`) as actual
-environment variables - copy `.env.example` to `.env` (gitignored,
-never commit it) as a reference for what each teammate needs to set.
+Every request carries a JWT from `auth-service` (issued at login, with
+the user's role, hazard and ward baked in). The gateway's
+`JwtAuthenticationFilter` validates that token and forwards the claims
+as `X-User-Id`, `X-User-Role`, `X-User-Hazard` and `X-User-Ward`
+headers to whichever service it's routing to - a service never sees a
+raw token, only these pre-validated headers.
 
-**Critical constraint:** `JWT_SECRET` must be identical across
-auth-service and gateway (and every future service that validates
-tokens), or auth-service's tokens will be rejected at the gateway.
-Don't let people set their own random value per machine.
+Each service resolves those headers into a `RequestContext` and passes
+it to `HazardScopeGuard` (shared by every hazard service, from the
+`common` module) before any read or write. The rules it enforces:
 
-## Conventions for hazard service authors
+- **WARD_RECORDER** - may create/view/edit only their own (ward, hazard)
+  records, and only their own submissions.
+- **PROVINCIAL_SUPERVISOR** - may approve/reject/request-corrections
+  only for their own hazard, province-wide (no ward restriction).
+- **NATIONAL_VIEWER** - read-only, and only `APPROVED` records, across
+  any hazard.
+- **PROVINCIAL_ADMIN** - read-only, but may see pending records too
+  (not just approved) - the brief gives them visibility, not approval
+  power.
 
-Once `flood-service` exists as the reference implementation, each hazard
-service should:
-- reuse the same shared incident fields (ward, district, province,
-  occurredAt, reporterId, severity, status, latitude, longitude)
-- implement the same approval state machine
-  (PENDING -> APPROVED / REJECTED / CORRECTIONS_REQUESTED -> PENDING)
-- enforce (ward, hazard) scoping for recorders and hazard scoping for
-  supervisors independently, in the service itself - never rely on the
-  gateway filter alone
-- own its own MySQL schema (already created by mysql-init on first
-  `docker-compose up`)
+This check happens in each service's own service layer, never only at
+the gateway - a service never trusts the gateway's routing alone to
+enforce access control.
 
-A per-hazard checklist (exact fields, exact DB table, exact DTOs) will be
-issued once flood-service is done.
+## Approval workflow
 
-## mining-accident-service (Day 3) - REFERENCE IMPLEMENTATION
+A `WARD_RECORDER` submits an incident, which starts as `PENDING`. From
+there, the hazard's `PROVINCIAL_SUPERVISOR` can:
 
-Runs on port 8082. This is the pattern the other four hazard services
-copy. It has:
-- REST API (`/mining-accident-service/api/incidents/**`) with full
-  CRUD + approval workflow (approve / reject / request-corrections)
-- Web pages (`/mining-accident-service/web/submit`,
-  `/web/my-submissions`, `/web/queue`) - plain Thymeleaf pages whose JS
-  calls the REST API with a token from localStorage (set by the login
-  page)
-- RBAC/scoping enforced in the service layer via `HazardScopeGuard`
-  (from the shared `common` module) - never trust the gateway alone
-- Audit log recording every state transition
+- **Approve** - status becomes `APPROVED`, and the service publishes an
+  "incident approved" event for alert-service to pick up (see below).
+- **Reject** - status becomes `REJECTED`, with the supervisor's notes.
+- **Request corrections** - status becomes `CORRECTIONS_REQUESTED`,
+  with notes explaining what's needed; the recorder can edit and
+  resubmit, returning it to `PENDING`.
 
-**Try it end to end** (with the frontend running per "Running the
-frontend" above):
-1. Open `http://localhost:5173/login`, log in as `mining.recorder` /
-   `Password123!`
-2. Go to the Submit page, submit an incident
-3. Log out, log in as `mining.supervisor` / `Password123!`
-4. Go to the Queue page, approve/reject/request-corrections on it
+Every transition is written to that hazard's audit log (who, when,
+what action, what notes) - this is a separate table from the incident
+itself, so the full history survives even after the incident's current
+status changes again.
 
-**REST API (for Postman/testing):**
+## How alerts are dispatched
 
-| Method | Path | Who |
-|---|---|---|
-| POST | `/api/incidents` | WARD_RECORDER (own ward/hazard) |
-| GET | `/api/incidents` | any role - results scoped automatically |
-| GET | `/api/incidents/{id}` | any role - scoped automatically |
-| PUT | `/api/incidents/{id}` | recorder, own record, PENDING/CORRECTIONS_REQUESTED only |
-| DELETE | `/api/incidents/{id}` | recorder, own record, not yet APPROVED |
-| POST | `/api/incidents/{id}/approve` | supervisor, own hazard |
-| POST | `/api/incidents/{id}/reject` | supervisor, own hazard, body: `{"notes": "..."}` |
-| POST | `/api/incidents/{id}/request-corrections` | supervisor, own hazard, body: `{"notes": "..."}` |
+When a supervisor approves an incident, the hazard service publishes
+an `IncidentApprovedEvent` to RabbitMQ (topic exchange `dpdms.incidents`,
+routing key `incident.approved.<hazard>`, e.g. `incident.approved.flood`).
+This is fire-and-forget: if RabbitMQ is unreachable, the approval still
+saves, a warning is logged, and nothing blocks the recorder/supervisor.
 
-Swagger UI: `http://localhost:8082/swagger-ui.html` (direct, or through
-the gateway once routed).
+`alert-service` consumes every `incident.approved.#` message and decides
+whether to actually notify anyone:
 
-## common module - shared library (NOT a running service)
+1. Each hazard service flags whether its own hazard-specific criteria
+   are met (e.g. mining: any fatalities or trapped/injured).
+2. As a safety net, any incident at or above a configured severity
+   (`dpdms.alerts.always-alert-severity`, default `CRITICAL`) always
+   alerts, regardless of that flag.
+3. If neither applies, the incident is still recorded in `alert-service`
+   with status `SUPPRESSED` - visible for audit, but nobody is notified.
 
-`Role`, `Hazard`, `IncidentStatus`, `Severity`, `AuditAction` enums;
-`BaseIncident` / `BaseAuditLog` (JPA MappedSuperclass - shared fields);
-`RequestContext` + `RequestContextResolver` (reads the gateway's
-X-User-* headers); `HazardScopeGuard` (the actual RBAC/scoping checks).
+When an alert does fire, it's sent through every *enabled* channel to
+every configured recipient: email (SMTP), and/or WhatsApp (either
+Meta's WhatsApp Business Cloud API or Green API, an unofficial QR-paired
+gateway - at most one of these two should be enabled at a time). If no
+channel is enabled, the alert is written to the application log
+instead. Every delivery attempt (success or failure, per channel, per
+recipient) is recorded individually, and duplicate events for the same
+incident are detected and ignored.
 
-This is a compile-time dependency only - no hazard service calls
-another hazard service over HTTP, each still has its own schema, own
-REST API, own deployable jar. It's the same pattern as sharing a
-DTO/utils jar in any production microservice system, and keeps the
-RBAC logic identical and correct across all five services instead of
-each person re-implementing (and possibly getting wrong) the same
-scoping rules from scratch.
+## Frontend
 
-## Checklist for building another hazard service (copy mining-accident-service)
-
-1. Copy the whole `mining-accident-service` folder, rename it to
-   `<yourhazard>-service`, and do a project-wide rename of the Java
-   package `zw.ac.uz.dpdms.mining` to `zw.ac.uz.dpdms.<yourhazard>`
-   (IntelliJ: right-click the package > Refactor > Rename handles this
-   safely, don't do it with find-replace on raw text).
-2. In `pom.xml`: change `<artifactId>` to `<yourhazard>-service`.
-3. In `application.yml`: change `server.port` to a free port (8083,
-   8084, 8085, 8086 - agree as a team who takes which), change the
-   datasource URL's database name to `<yourhazard>_db` (already
-   created by `mysql-init`).
-4. In your entity (e.g. `FloodIncident extends BaseIncident`): replace
-   the 5 mining-specific fields with your hazard's 5 indicators from
-   the brief, matching field types (number -> Integer/Double,
-   categorical -> your own enum, yes/no -> Boolean).
-5. In your service class: change `SERVICE_HAZARD` to your hazard's
-   `Hazard` enum value (e.g. `Hazard.FLOOD`). That one line is what
-   makes all the RBAC scoping apply correctly to your hazard - don't
-   touch the `HazardScopeGuard` calls themselves, they're already
-   correct.
-6. Update your DTOs' hazard-specific fields to match your entity.
-7. Update the Thymeleaf templates' hazard-specific form fields and
-   table columns to match.
-8. In `pom.xml` (root): uncomment your service's module line.
-9. In gateway's `application.yml`: your route already exists (all 5
-   hazard routes were pre-wired on Day 1) - nothing to change there.
-10. Seed test accounts already exist for every hazard in auth-service's
-    `DataSeeder` - use `<yourhazard>.recorder` / `<yourhazard>.supervisor`,
-    password `Password123!`.
+React + Vite, in `frontend/`. The project originally used server-rendered
+Thymeleaf pages; those were replaced with this SPA. Reasoning: the SPA
+talks to every backend service through the gateway using relative paths
+(e.g. `/flood-service/api/incidents`), and in dev, Vite proxies each of
+those prefixes straight through to the gateway - so the browser sees the
+app and the API as the same origin. That gives the same "no CORS
+configuration needed anywhere in the backend" property the old
+Thymeleaf pages got for free by being server-rendered through the
+gateway, while allowing a modern, componentized UI (role-based routing,
+shared map/table/form components across all five hazards) instead of
+duplicating server-rendered templates per hazard.
