@@ -16,6 +16,8 @@ across Rushinga's wards and provinces.
 
 Prerequisites: Java 17, Maven, Node.js, Docker Desktop.
 
+All commands below run from the `dpdms/` folder.
+
 1. Start infrastructure:
    ```
    docker-compose up -d
