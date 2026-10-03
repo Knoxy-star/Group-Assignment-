@@ -21,13 +21,16 @@ alert-service, dashboard-service) is built collaboratively.
 - Java 17, Spring Boot 3.3.4, Spring Cloud 2023.0.3
 - MySQL 8 (one schema per service)
 - RabbitMQ (async alert dispatch)
-- Thymeleaf (server-rendered front end)
+- React + Vite frontend (`frontend/`) - talks to every service through
+  the gateway at relative paths like `/flood-service/api/incidents`, so
+  there's zero CORS configuration in the backend
 - Eureka (service discovery) + Spring Cloud Gateway (single entry point)
 - Maven, single repo, multi-module
 
-We chose Thymeleaf over a separate SPA framework to avoid adding a second
-build pipeline and CORS configuration on top of nine backend services
-within a 9-day project timeline.
+The project originally used server-rendered Thymeleaf pages; those were
+replaced with the React + Vite SPA in `frontend/` (see commit history).
+If you find any doc or comment still describing Thymeleaf pages, it's
+stale - the frontend is now the only UI.
 
 ## Project layout
 
@@ -36,8 +39,12 @@ dpdms/
   pom.xml                 <- parent, lists all modules
   discovery-service/      <- Eureka registry (port 8761)
   gateway/                <- API gateway, single entry point (port 8080)
+  frontend/               <- React + Vite SPA (dev server port 5173)
   docker-compose.yml       <- MySQL + RabbitMQ infra
   mysql-init/              <- creates one schema per service on first boot
+  notification-service/   <- unfinished/unused scaffold (Twilio), not
+                              wired into the gateway or started by anyone;
+                              ignore unless you're picking it up
   (more modules land here as they're built)
 ```
 
@@ -69,6 +76,18 @@ dpdms/
 
 If both of those are running and visible in Eureka, Day 1 infrastructure
 is working end to end and the next services can be added safely.
+
+## Running the frontend
+
+```
+cd frontend
+npm install
+npm run dev
+```
+Opens at http://localhost:5173. Vite proxies every `/xxx-service/**`
+request straight through to the gateway (port 8080), so the gateway and
+all backing services need to be up first. `npm run build` produces a
+production bundle in `frontend/dist/` (gitignored, build output only).
 
 ## Running order (once more services exist)
 
@@ -107,6 +126,67 @@ all of them is `Password123!`):**
 
 Use these to test any hazard service's RBAC/scoping logic without
 registering new users each time.
+
+## Database
+
+MySQL runs as the `mysql` container defined in `docker-compose.yml`.
+Its data is **not** a file inside this repo - it lives in a Docker-
+managed named volume (`mysql_data`), which Docker stores under its own
+data directory (inside the Docker Desktop VM on Windows/Mac). This is
+the standard, portable way to persist a containerized database: every
+teammate gets the same behavior regardless of where they cloned the
+repo, and nothing under `dpdms/` depends on an absolute path on anyone's
+machine.
+
+- Starts fresh on a new machine the first time `docker-compose up -d`
+  runs: `mysql-init/01-create-databases.sql` creates all 9 schemas and
+  the shared `dpdms` app user automatically.
+- To wipe the database and start over: `docker-compose down -v` (removes
+  the `mysql_data` volume too).
+- Every service connects to `jdbc:mysql://localhost:3306/<name>_db`
+  (see each service's `src/main/resources/application.yml`) - no
+  hardcoded host paths anywhere in the config.
+
+### Importing the included database dump
+
+`dpdms-dump.sql` (repo root) is a `mysqldump` snapshot of all 9 schemas,
+taken after starting every service once so tables exist, with the 12
+seeded test accounts already in it (passwords are bcrypt hashes, not
+plaintext - safe to commit). It's a convenience, not a requirement: the
+same tables and accounts get created automatically the first time you
+start the services anyway (see "Day 1 setup" and auth-service's
+`DataSeeder`). Use the dump if you want the data in place *before*
+starting any service, e.g. to inspect it directly in a MySQL client.
+
+1. Start just the MySQL container (skip this if it's already running):
+   ```
+   docker-compose up -d mysql
+   ```
+2. Import - from a bash shell (Git Bash, WSL, macOS, Linux):
+   ```
+   docker exec -i dpdms-mysql mysql -u root -proot_pass < dpdms-dump.sql
+   ```
+   From PowerShell (`<` redirection doesn't work the same way):
+   ```
+   Get-Content dpdms-dump.sql | docker exec -i dpdms-mysql mysql -u root -proot_pass
+   ```
+3. Verify: `docker exec dpdms-mysql mysql -u root -proot_pass -e "SELECT username, role FROM auth_db.users;"`
+   should list all 12 test accounts.
+
+The dump is idempotent-ish but not a merge: re-importing re-creates the
+same 9 databases and re-inserts the same seed rows. If you've since
+submitted real incidents through the app and don't want to lose them,
+don't re-import over a database you care about - take a fresh dump
+instead (see below).
+
+**Re-generating the dump** (e.g. before a demo, to capture more test
+data): with every service running at least once against the database,
+```
+docker exec dpdms-mysql mysqldump -u root -proot_pass \
+  --databases auth_db flood_db drought_db fire_db zoonotic_db mining_db report_db alert_db dashboard_db \
+  --routines --triggers --single-transaction --comments \
+  > dpdms-dump.sql
+```
 
 ## Environment variables and secrets
 
@@ -153,15 +233,13 @@ copy. It has:
   (from the shared `common` module) - never trust the gateway alone
 - Audit log recording every state transition
 
-**Try it end to end:**
-1. Open `http://localhost:8080/auth-service/login.html`, log in as
-   `mining.recorder` / `Password123!`
-2. Go to `http://localhost:8080/mining-accident-service/web/submit`,
-   submit an incident
-3. Log out (clear localStorage / open an incognito window), log in as
-   `mining.supervisor` / `Password123!`
-4. Go to `http://localhost:8080/mining-accident-service/web/queue`,
-   approve/reject/request-corrections on it
+**Try it end to end** (with the frontend running per "Running the
+frontend" above):
+1. Open `http://localhost:5173/login`, log in as `mining.recorder` /
+   `Password123!`
+2. Go to the Submit page, submit an incident
+3. Log out, log in as `mining.supervisor` / `Password123!`
+4. Go to the Queue page, approve/reject/request-corrections on it
 
 **REST API (for Postman/testing):**
 

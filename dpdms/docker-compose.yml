@@ -21,7 +21,10 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      # Bind-mounted into the project folder (./mysql-data, gitignored)
+      # instead of a Docker-managed named volume, so the database file
+      # lives inside the repo rather than somewhere else on the host.
+      - ./mysql-data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_pass"]
@@ -41,6 +44,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
-volumes:
-  mysql_data:

@@ -7,3 +7,7 @@ target/
 .DS_Store
 .env
 HELP.md
+
+# MySQL data files (bind-mounted by docker-compose.yml) - binary DB
+# files, never commit these
+/mysql-data/
