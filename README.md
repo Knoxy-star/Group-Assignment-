@@ -69,8 +69,10 @@ All commands below run from the `dpdms/` folder.
 
 **Environment variables:** every service falls back to a safe dev-only
 default if an env var isn't set, so the steps above work with zero
-configuration. See `.env.example` at the repo root for what each one
-does (email/WhatsApp alert credentials, JWT secret). The one hard
+configuration. The real `.env` is not included in the submission: to set
+your own values, copy `dpdms/.env.example` to `dpdms/.env` and fill them
+in. The file documents what each one does (email/WhatsApp alert
+credentials, JWT secret). The one hard
 constraint: `JWT_SECRET` must be set identically on `auth-service` and
 `gateway` if you override it, or tokens issued by `auth-service` will
 be rejected at the gateway.
